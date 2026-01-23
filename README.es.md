@@ -8,16 +8,16 @@
 
 **LMU RPC Mod** es una aplicación independiente que lleva **Discord Rich Presence** a **Le Mans Ultimate**. Muestra a tus amigos exactamente qué estás conduciendo, dónde y tu posición, con actualizaciones en tiempo real y detección automática.
 
-![LMU RPC Banner](pequenobanner.png)
+![LMU RPC Banner](img\pequenobanner.png)
 
 ## 📸 Vistas Previas (Previews)
 
 Mira cómo aparecerá tu estado en Discord en diferentes situaciones de juego:
 
 <p align="center">
-  <img src="preview1.png" alt="Menú" width="32%">
-  <img src="preview2.png" alt="Práctica" width="32%">
-  <img src="preview3.png" alt="Carrera" width="32%">
+  <img src="img\preview1.png" alt="Menú" width="32%">
+  <img src="img\preview2.png" alt="Práctica" width="32%">
+  <img src="img\preview3.png" alt="Carrera" width="32%">
 </p>
 
 ### 🛡️ Safety Rating Dinámico
@@ -25,7 +25,7 @@ El pequeño icono en la esquina de la imagen refleja automáticamente tu **Clasi
 
 | Bronce | Plata | Oro | Platino |
 | :---: | :---: | :---: | :---: |
-| <img src="rank_bronze.png" width="60"> | <img src="rank_silver.png" width="60"> | <img src="rank_gold.png" width="60"> | <img src="rank_platinum.png" width="60"> |
+| <img src="img\rank_bronze.png" width="60"> | <img src="img\rank_silver.png" width="60"> | <img src="img\rank_gold.png" width="60"> | <img src="img\rank_platinum.png" width="60"> |
 
 ##  Características
 

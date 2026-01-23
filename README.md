@@ -15,9 +15,9 @@
 See how your status will appear on Discord in different game situations:
 
 <p align="center">
-  <img src="preview1.png" alt="Menu" width="32%">
-  <img src="preview2.png" alt="Practice" width="32%">
-  <img src="preview3.png" alt="Race" width="32%">
+  <img src="img\preview1.png" alt="Menu" width="32%">
+  <img src="img\preview2.png" alt="Practice" width="32%">
+  <img src="img\vpreview3.png" alt="Race" width="32%">
 </p>
 
 ### 🛡️ Dynamic Safety Rating
@@ -25,7 +25,7 @@ The small icon in the corner of the image automatically reflects your current **
 
 | Bronze | Silver | Gold | Platinum |
 | :---: | :---: | :---: | :---: |
-| <img src="rank_bronze.png" width="60"> | <img src="rank_silver.png" width="60"> | <img src="rank_gold.png" width="60"> | <img src="rank_platinum.png" width="60"> |
+| <img src="img\rank_bronze.png" width="60"> | <img src="img\rank_silver.png" width="60"> | <img src="img\rank_gold.png" width="60"> | <img src="img\rank_platinum.png" width="60"> |
 
 ##  Features
 
