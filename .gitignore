@@ -1,0 +1,27 @@
+# Ambientes Virtuais
+.venv/
+venv/
+env/
+
+# Build e Distribuição
+dist/
+build/
+*.spec
+
+# Python Cache
+__pycache__/
+
+# Logs e Debug
+*.log
+debug_log.txt
+
+# Configurações de Usuário (Não devem ir para o repo público)
+config.json
+
+# IDEs e Editores
+.vscode/
+.idea/
+
+# Arquivos Temporários do Sistema
+Thumbs.db
+Desktop.ini

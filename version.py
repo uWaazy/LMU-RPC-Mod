@@ -1,0 +1,3 @@
+VERSION = "0.1"
+BUILD_TYPE = "BETA"
+AUTHOR = "uWaazy"

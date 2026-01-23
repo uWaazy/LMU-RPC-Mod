@@ -1,0 +1,7 @@
+pypresence
+pyinstaller
+pystray
+Pillow
+psutil
+customtkinter
+packaging
