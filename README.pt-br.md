@@ -1,14 +1,21 @@
+<div align="right">
+  <a href="README.md">
+    <img src="https://img.shields.io/badge/Read%20in-English-blue?style=for-the-badge" alt="Read in English">
+  </a>
+  <a href="README.es.md">
+    <img src="https://img.shields.io/badge/Leer%20en-Espa%C3%B1ol-yellow?style=for-the-badge" alt="Leer en Español">
+  </a>
+</div>
+
 # LMU RPC Mod
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Release](https://img.shields.io/github/v/release/uWaazy/LMU-RPC-Mod?style=for-the-badge&color=green)](https://github.com/uWaazy/LMU-RPC-Mod/releases)
 [![Discord](https://img.shields.io/discord/1463577784394973392?style=for-the-badge&logo=discord&logoColor=white&label=Suporte)](https://discord.gg/cE6B2azY73)
 
-[🇺🇸 English](README.md) | [🇪🇸 Español](README.es.md)
-
 **LMU RPC Mod** é uma aplicação independente que traz o **Discord Rich Presence** para o **Le Mans Ultimate**. Mostre aos seus amigos exatamente o que você está pilotando, onde e sua posição, com atualizações em tempo real e detecção automática.
 
-![LMU RPC Banner](pequenobanner.png)
+![LMU RPC Banner](img\pequenobanner.png)
 
 ## 📸 Visualização (Previews)
 
