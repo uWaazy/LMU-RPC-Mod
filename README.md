@@ -24,7 +24,7 @@ See how your status will appear on Discord in different game situations:
 <p align="center">
   <img src="img\preview1.png" alt="Menu" width="32%">
   <img src="img\preview2.png" alt="Practice" width="32%">
-  <img src="img\vpreview3.png" alt="Race" width="32%">
+  <img src="img\preview3.png" alt="Race" width="32%">
 </p>
 
 ### 🛡️ Dynamic Safety Rating
