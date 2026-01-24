@@ -48,7 +48,7 @@ The small icon in the corner of the image automatically reflects your current **
 1.  Go to the [**Releases**](https://github.com/uWaazy/LMU-RPC-Mod/releases) page.
 2.  Download the latest `.zip` file (e.g., `LMU_RPC_v1.0.zip`).
 3.  Extract the file anywhere on your PC.
-4.  Run `LMU_RPC_v1.0.exe`.
+4.  Run `LMU_RPC.exe` and initiate RPC through the app.
 5.  Open **Le Mans Ultimate** and enjoy!
 
 ## 🛠️ Related Projects
