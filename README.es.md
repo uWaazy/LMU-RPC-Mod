@@ -15,7 +15,7 @@
 
 **LMU RPC Mod** es una aplicación independiente que lleva **Discord Rich Presence** a **Le Mans Ultimate**. Muestra a tus amigos exactamente qué estás conduciendo, dónde y tu posición, con actualizaciones en tiempo real y detección automática.
 
-![LMU RPC Banner](pequenobanner.png)
+![LMU RPC Banner](preview.png)
 
 ## 📸 Vistas Previas (Previews)
 
