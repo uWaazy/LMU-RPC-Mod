@@ -1,8 +1,6 @@
 import sys
 import os
 import time
-import sys
-import os
 import threading
 import tkinter as tk
 import tkinter.messagebox
@@ -11,6 +9,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import json
 import winreg
+import requests
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'pyLMUSharedMemory'))
 sys.path.append(os.path.join(os.path.dirname(__file__), 'pyRfactor2SharedMemory'))
@@ -212,6 +211,7 @@ class RF2Data:
         self.lmu = SimInfo()
         self.last_et = -1.0
         self.stale_counter = 0
+        self.vehicle_name_cache = {}
         logger.info("Módulo de leitura de memória (pyLMUSharedMemory) inicializado.")
 
     def reconnect(self):
@@ -246,12 +246,58 @@ class RF2Data:
             'sr_number': sr_number
         }
 
+    def _safe_decode(self, raw_bytes):
+        try:
+            if raw_bytes is None:
+                return ""
+            return raw_bytes.decode('utf-8', errors='ignore').split('\x00')[0].strip()
+        except Exception:
+            return ""
+
+    def get_player_vehicle_from_api(self, raw_vehicle_name, veh_filename):
+        cache_key = (veh_filename or "").lower().strip(), (raw_vehicle_name or "").lower().strip()
+        if cache_key in self.vehicle_name_cache:
+            cached_name = self.vehicle_name_cache[cache_key]
+            logger.debug(f"Vehicle name translation cache hit: {cache_key} -> {cached_name}")
+            return cached_name
+
+        logger.debug(f"Vehicle name translation cache miss: raw_vehicle_name={raw_vehicle_name!r}, veh_filename={veh_filename!r}")
+        try:
+            response = requests.get('http://localhost:6397/rest/sessions/getAllVehicles', timeout=1.0)
+            if response.status_code == 200:
+                vehicles = response.json()
+                for v in vehicles:
+                    api_id = v.get("id", "")
+                    api_veh_file = v.get("vehFile", "")
+                    api_veh_name = v.get("vehicle", "")
+                    api_desc = v.get("desc", "")
+
+                    # Match primário e infalível: ID único do arquivo .VEH
+                    if veh_filename and (veh_filename.lower() in api_id.lower() or veh_filename.lower() in api_veh_file.lower()):
+                        path = v.get("fullPathTree", "")
+                        if path:
+                            clean_name = path.split(",")[-1].strip()
+                            self.vehicle_name_cache[cache_key] = clean_name
+                            return clean_name
+
+                    # Match secundário: Nome da string caso o veh_filename falhe
+                    if raw_vehicle_name.lower() in api_veh_name.lower() or raw_vehicle_name.lower() in api_desc.lower():
+                        path = v.get("fullPathTree", "")
+                        if path:
+                            clean_name = path.split(",")[-1].strip()
+                            self.vehicle_name_cache[cache_key] = clean_name
+                            return clean_name
+        except Exception as e:
+            logger.debug(f"API translation failed: {e}")
+        return raw_vehicle_name
+
     def normalize_track_name(self, raw_name):
-        if not raw_name: return ""
+        if not raw_name:
+            return raw_name
+
         s = raw_name.lower()
-        
-        track_display = raw_name 
-        
+        track_display = raw_name
+
         track_map = {
             "carlos pace": "Interlagos",
             "interlagos": "Interlagos",
@@ -275,12 +321,12 @@ class RF2Data:
             "paul ricard": "Paul Ricard",
             "ricard": "Paul Ricard",
         }
-        
+
         for key, val in track_map.items():
             if key in s:
                 track_display = val
                 break
-                
+
         layout_map = {
             "endurance circuit": "Endurance C.",
             "outer circuit": "Outer C.",
@@ -292,17 +338,17 @@ class RF2Data:
             "curva grande circuit": "Curva Grande C.",
             "school circuit": "School C.",
         }
-        
+
         detected_layouts = []
         for l_key, l_abbr in layout_map.items():
             if l_key in s:
-                if l_key == "national circuit" and ("international" in s or "internacional" in s): continue
-                
+                if l_key == "national circuit" and ("international" in s or "internacional" in s):
+                    continue
                 detected_layouts.append(l_abbr)
-                
+
         if detected_layouts:
             return f"{track_display} ({', '.join(detected_layouts)})"
-        
+
         return track_display
 
     def update(self):
@@ -360,7 +406,7 @@ class RF2Data:
                     }
             
             session_name = self.get_session_name(scoring.scoringInfo.mSession)
-            track_name_raw = scoring.scoringInfo.mTrackName.decode('utf-8', errors='ignore').strip('\x00')
+            track_name_raw = self._safe_decode(scoring.scoringInfo.mTrackName)
             track_name = self.normalize_track_name(track_name_raw)
             
             player_vehicle = None
@@ -379,15 +425,28 @@ class RF2Data:
                     'ranks': ranks
                 }
 
-            vehicle_name = player_vehicle.mVehicleName.decode('utf-8', errors='ignore').strip('\x00')
-            
-            if vehicle_name.endswith(":LM"):
-                vehicle_name = vehicle_name[:-3]
-            elif vehicle_name.endswith(":ELMS"):
-                vehicle_name = vehicle_name[:-5]
+            raw_vehicle_name = self._safe_decode(player_vehicle.mVehicleName)
+            if raw_vehicle_name.endswith(":LM"):
+                raw_vehicle_name = raw_vehicle_name[:-3]
+            elif raw_vehicle_name.endswith(":ELMS"):
+                raw_vehicle_name = raw_vehicle_name[:-5]
 
-            vehicle_class = player_vehicle.mVehicleClass.decode('utf-8', errors='ignore').strip('\x00')
-            veh_filename = player_vehicle.mVehFilename.decode('utf-8', errors='ignore').strip('\x00')
+            # Lê o nome do ficheiro (ID do carro) de forma segura:
+            try:
+                veh_filename = player_vehicle.mVehFilename.decode('utf-8', errors='ignore').split('\x00')[0].strip()
+            except Exception:
+                veh_filename = ""
+
+            try:
+                clean_vehicle_name = self.get_player_vehicle_from_api(raw_vehicle_name, veh_filename)
+            except Exception:
+                clean_vehicle_name = raw_vehicle_name
+
+            vehicle_name = clean_vehicle_name or raw_vehicle_name
+            logger.debug(f"Using vehicle name for RPC: {vehicle_name}")
+
+            vehicle_class = self._safe_decode(player_vehicle.mVehicleClass)
+            veh_filename = self._safe_decode(player_vehicle.mVehFilename)
 
             return {
                 'status': 'connected_driving',
@@ -409,7 +468,7 @@ class RF2Data:
             logger.debug(f"Erro na leitura de memória (jogo fechado ou carregando): {e}")
             return {'status': 'game_closed'}
 
-def get_car_asset_and_name(vehicle_name, veh_filename=None):
+def _get_car_asset_and_name(vehicle_name, veh_filename=None, vehicle_class=""):
     
     if veh_filename:
         fname = veh_filename.lower().replace('\\', '/') 
@@ -446,6 +505,16 @@ def get_car_asset_and_name(vehicle_name, veh_filename=None):
             "toyota_gr10_2023": ("car_toyota_gr010", "Toyota GR010-Hybrid"),
             "vandervell_680_2023": ("car_vanwall_680", "Vanwall Vandervell 680"),
             "vantage_amr_gt3evo_2024": ("car_aston_martin_vantage_gt3", "Aston Martin Vantage GT3"),
+            "duqueine_d09_lmp3": ("car_duqueine_d09", "Duqueine D09 LMP3"),
+            "duqueine_d09_p3": ("car_duqueine_d09", "Duqueine D09 LMP3"),
+            "duqueine_d09": ("car_duqueine_d09", "Duqueine D09 LMP3"),
+            "genesis_gmr_001": ("car_genesis_hy", "GMR-001 Genesis Hypercar"),
+            "genesis_gmr-001": ("car_genesis_hy", "GMR-001 Genesis Hypercar"),
+            "genesis_gmr001": ("car_genesis_hy", "GMR-001 Genesis Hypercar"),
+            "gmr_001_hypercar": ("car_genesis_hy", "GMR-001 Genesis Hypercar"),
+            "gmr-001_hypercar": ("car_genesis_hy", "GMR-001 Genesis Hypercar"),
+            "gmr001_hypercar": ("car_genesis_hy", "GMR-001 Genesis Hypercar"),
+
         }
 
         for folder, (asset, name) in folder_map.items():
@@ -457,83 +526,6 @@ def get_car_asset_and_name(vehicle_name, veh_filename=None):
 
     vehicle_name_lower = vehicle_name.lower()
 
-    
-    if "proton" in vehicle_name_lower:
-        if "mustang" in vehicle_name_lower or "gt3" in vehicle_name_lower: return 'car_ford_mustang_gt3', 'Ford Mustang LMGT3'
-        if "963" in vehicle_name_lower or "hypercar" in vehicle_name_lower: return 'car_porsche_963', 'Porsche 963'
-        if "rsr" in vehicle_name_lower or "gte" in vehicle_name_lower: return 'car_porsche_911_rsr', 'Porsche 911 RSR-19'
-        if "oreca" in vehicle_name_lower or "lmp2" in vehicle_name_lower: return 'car_oreca_07_2024', 'Oreca 07 Gibson 2024'
-        if "99" in vehicle_name_lower: return 'car_porsche_963', 'Porsche 963'
-        if "77" in vehicle_name_lower or "88" in vehicle_name_lower or "44" in vehicle_name_lower: return 'car_ford_mustang_gt3', 'Ford Mustang LMGT3'
-        if "9" in vehicle_name_lower: return 'car_oreca_07_2024', 'Oreca 07 Gibson 2024'
-    
-    if "iron lynx" in vehicle_name_lower:
-        if "sc63" in vehicle_name_lower or "hypercar" in vehicle_name_lower: return 'car_lamborghini_sc63', 'Lamborghini SC63'
-        if "huracan" in vehicle_name_lower or "gt3" in vehicle_name_lower: return 'car_lamborghini_huracan_gt3', 'Lamborghini Huracan GT3'
-        if "mercedes" in vehicle_name_lower: return 'car_mercedes_amg_gt3', 'Mercedes-AMG LMGT3'
-        if "rsr" in vehicle_name_lower or "gte" in vehicle_name_lower: return 'car_porsche_911_rsr', 'Porsche 911 RSR-19'
-        if "63" in vehicle_name_lower or "19" in vehicle_name_lower: return 'car_lamborghini_sc63', 'Lamborghini SC63'
-        if "60" in vehicle_name_lower: return 'car_lamborghini_huracan_gt3', 'Lamborghini Huracan GT3'
-        if "61" in vehicle_name_lower: return 'car_mercedes_amg_gt3', 'Mercedes-AMG LMGT3'
-
-    if "iron dames" in vehicle_name_lower:
-        if "huracan" in vehicle_name_lower or "gt3" in vehicle_name_lower: return 'car_lambo_huracan_gt3', 'Lamborghini Huracan GT3'
-        if "rsr" in vehicle_name_lower or "gte" in vehicle_name_lower: return 'car_porsche_911_rsr', 'Porsche 911 RSR-19'
-        return 'car_lambo_huracan_gt3', 'Lamborghini Huracan GT3' # Default 2024
-
-    if "team wrt" in vehicle_name_lower:
-        if "bmw" in vehicle_name_lower and "hybrid" in vehicle_name_lower: return 'car_bmw_m_hybrid_v8', 'BMW M Hybrid V8'
-        if "bmw" in vehicle_name_lower or "m4" in vehicle_name_lower or "gt3" in vehicle_name_lower: return 'car_bmw_m4_gt3', 'BMW M4 LMGT3'
-        if "oreca" in vehicle_name_lower or "lmp2" in vehicle_name_lower: return 'car_oreca_07_2024', 'Oreca 07 Gibson 2024'
-        if "46" in vehicle_name_lower or "31" in vehicle_name_lower: return 'car_bmw_m4_gt3', 'BMW M4 LMGT3'
-        if "41" in vehicle_name_lower: return 'car_oreca_07_2024', 'Oreca 07 Gibson 2024'
-        if "15" in vehicle_name_lower or "20" in vehicle_name_lower: return 'car_bmw_m_hybrid_v8', 'BMW M Hybrid V8'
-
-    if "united autosport" in vehicle_name_lower:
-        if "mclaren" in vehicle_name_lower or "gt3" in vehicle_name_lower: return 'car_mclaren_720s_gt3', 'McLaren 720S Evo'
-        if "oreca" in vehicle_name_lower or "lmp2" in vehicle_name_lower: return 'car_oreca_07_2024', 'Oreca 07 Gibson 2024'
-        if "ligier" in vehicle_name_lower or "lmp3" in vehicle_name_lower: return 'car_ligier_js_p325', 'Ligier JS P325'
-        if "59" in vehicle_name_lower or "95" in vehicle_name_lower: return 'car_mclaren_720s_gt3', 'McLaren 720S Evo'
-        return 'car_oreca_07_2024', 'Oreca 07 Gibson 2024'
-
-    if "af corse" in vehicle_name_lower:
-        if "499p" in vehicle_name_lower or "hypercar" in vehicle_name_lower: return 'car_ferrari_499p', 'Ferrari 499P'
-        if "296" in vehicle_name_lower or "gt3" in vehicle_name_lower or "vista" in vehicle_name_lower: return 'car_ferrari_296_gt3', 'Ferrari 296 LMGT3'
-        if "oreca" in vehicle_name_lower or "lmp2" in vehicle_name_lower: return 'car_oreca_07_2024', 'Oreca 07 Gibson 2024'
-        if "488" in vehicle_name_lower or "gte" in vehicle_name_lower: return 'car_ferrari_488_gte', 'Ferrari 488 GTE'
-        if "83" in vehicle_name_lower and "183" not in vehicle_name_lower: return 'car_ferrari_499p', 'Ferrari 499P'
-        if "50" in vehicle_name_lower or "51" in vehicle_name_lower: return 'car_ferrari_499p', 'Ferrari 499P'
-        if "54" in vehicle_name_lower or "55" in vehicle_name_lower: return 'car_ferrari_296_gt3', 'Ferrari 296 LMGT3'
-        if "183" in vehicle_name_lower: return 'car_oreca_07_2024', 'Oreca 07 Gibson 2024'
-
-    if "heart of racing" in vehicle_name_lower:
-        if "valkyrie" in vehicle_name_lower or "hypercar" in vehicle_name_lower: return 'car_aston_martin_valkyrie', 'Aston Martin Valkyrie'
-        return 'car_aston_martin_vantage_gt3', 'Aston Martin Vantage GT3'
-
-    if "inter europol" in vehicle_name_lower:
-        if "lmp3" in vehicle_name_lower or "ligier" in vehicle_name_lower: return 'car_ligier_js_p325', 'Ligier JS P325'
-        if "88" in vehicle_name_lower: return 'car_ligier_js_p325', 'Ligier JS P325'
-        return 'car_oreca_07_2024', 'Oreca 07 Gibson 2024'
-
-    if "cool racing" in vehicle_name_lower:
-        if "lmp3" in vehicle_name_lower or "ligier" in vehicle_name_lower: return 'car_ligier_js_p325', 'Ligier JS P325'
-        if "17" in vehicle_name_lower: return 'car_ligier_js_p325', 'Ligier JS P325'
-        return 'car_oreca_07_2024', 'Oreca 07 Gibson 2024'
-
-    if "dkr engineering" in vehicle_name_lower:
-        if "lmp3" in vehicle_name_lower or "ligier" in vehicle_name_lower or "duqueine" in vehicle_name_lower: return 'car_ligier_js_p325', 'Ligier JS P325'
-        if "4" in vehicle_name_lower: return 'car_ligier_js_p325', 'Ligier JS P325'
-        return 'car_oreca_07_2024', 'Oreca 07 Gibson 2024'
-
-    if "rlr msport" in vehicle_name_lower:
-        if "lmp3" in vehicle_name_lower or "ligier" in vehicle_name_lower: return 'car_ligier_js_p325', 'Ligier JS P325'
-        if "5" in vehicle_name_lower or "15" in vehicle_name_lower: return 'car_ligier_js_p325', 'Ligier JS P325'
-        return 'car_oreca_07_2024', 'Oreca 07 Gibson 2024'
-
-    if "team virage" in vehicle_name_lower:
-        if "lmp3" in vehicle_name_lower or "ligier" in vehicle_name_lower: return 'car_ligier_js_p325', 'Ligier JS P325'
-        return 'car_oreca_07_2024', 'Oreca 07 Gibson 2024'
-
     car_map = {
         'car_alpine_a424': ['Alpine A424', ['alpine a', 'alpine endurance team', 'a424']],
         'car_aston_martin_valkyrie': ['Aston Martin Valkyrie', ['aston martin thor team']],
@@ -542,37 +534,41 @@ def get_car_asset_and_name(vehicle_name, veh_filename=None):
         'car_ferrari_499p': ['Ferrari 499P', ['ferrari 499p', 'ferrari af corse', 'ferrari af corse', 'af corse', 'af corse', 'af corse']],
         'car_glickenhaus_007': ['Glickenhaus SCG 007', ['glickenhaus scg', 'glickenhaus racing']],
         'car_isotta_fraschini': ['Isotta Fraschini', ['isotta fraschini tip6', 'isotta tip']],
-        'car_lamborghini_sc63': ['Lamborghini SC63', ['lamborghini sc', 'lamborghini iron lynx']],
+        'car_lamborghini_sc63': ['Lamborghini SC63', ['lamborghini sc', 'sc63']],
         'car_peugeot_9x8_2024': ['Peugeot 9X8 2024', ['peugeot 9x8 2024', 'peugeot totalenergies']],
         'car_peugeot_9x8': ['Peugeot 9X8', ['peugeot 9x8','peugeot totalenergies']],
-        'car_porsche_963': ['Porsche 963', ['porsche 963', 'porsche penske', 'hertz team jota', 'proton competition']],
+        'car_porsche_963': ['Porsche 963', ['porsche 963', 'porsche penske', 'hertz team jota']],
         'car_toyota_gr010': ['Toyota GR010', ['toyota gr010', 'toyota gazoo racing', 'toyota gazoo racing', 'toyota gazoo racing']],
         'car_vanwall_680': ['Vanwall Vandervell', ['vanwall 680', 'floyd vanwall racing team']],
 
         # --- LMGT3 ---
-        'car_ford_mustang_gt3': ['Ford Mustang LMGT3', ['mustang', 'proton competition',]],
+        'car_ford_mustang_gt3': ['Ford Mustang LMGT3', ['mustang']],
         'car_mclaren_720s_gt3': ['McLaren 720S LMGT3 Evo', ['mclaren 720s', 'united autosport',]],
         'car_mercedes_amg_gt3': ['Mercedes-AMG LMGT3', ['mercedes-amg', 'mercedes amg']],
         'car_bmw_m4_gt3': ['BMW M4 LMGT3', ['bmw m4', 'team wrt',]],
         'car_aston_martin_vantage_gt3': ['Aston Martin Vantage GT3', ['vantage gt3', 'heart of racing', 'station',]],
         'car_corvette_z06_gt3': ['Corvette Z06 LMGT3.R', ['corvette z06', 'tf sport',]],
         'car_ferrari_296_gt3': ['Ferrari 296 LMGT3', ['ferrari 296', 'vista af corse', 'spirit of race', 'gr racing', 'kessel', 'jmw motorsport']],
-        'car_lamborghini_huracan_gt3': ['Lamborghini Huracan GT3', ['huracan', 'iron dames', 'iron lynx']],
+        'car_lamborghini_huracan_gt3': ['Lamborghini Huracan GT3', ['huracan']],
         'car_lexus_rcf_gt3': ['Lexus RC F LMGT3', ['lexus rc f', 'akkodis asp',]],
-        'car_porsche_911_gt3': ['Porsche 911 GT3 R', ['porsche 911 gt3', 'manthey ema', 'manthey purerxcing']],
+        'car_porsche_911_gt3': ['Porsche 911 GT3 R', ['porsche 911 gt3']],
 
         # --- LMP2 ---
-        'car_oreca_07_2023': ['Oreca 07 Gibson', [ 'oreca 07', 'prema racing', 'vector sport', 'tower motorsports', 'nielsen racing', 'duqueine team', 'inter europol competition', 'cool racing', 'graff racing', 'dkr engineering', 'algarve pro racing', 'idec sport', 'panis racing', 'racing team turkey', 'crowdstrike', 'ao by tf', 'united autosports', 'alpine elf team', 'team wrt', 'af corse', 'jota', 'proton', 'rlr msport', 'team virage']],
-        'car_oreca_07_2024': ['Oreca 07 Gibson 2024', [ 'prema', 'vector sport 2024', 'tower', 'nielsen racing 2024', 'duqueine team 2024', 'inter europol', 'cool racing 2024', 'graff', 'dkr engineering 2024', 'algarve pro racing 2024', 'crowdstrike racing by apr 2024','panis racing 2024', 'racing team turkey', 'crowdstrike', 'ao by tf 2024', 'united autosports 2024', 'united autosports usa 2024', 'inter europol competition 2024', 'alpine elf team', 'team wrt', 'af corse 2024', 'jota', 'proton competition 2024', 'rlr msport', 'team virage', 'idec sport 2024',  'iron lynx - proton 2025', 'proton competition 2025', 'rlr msport 2025', 'idec sport 2025',  'united autosports 2025',  'nielsen racing', 'algarve pro racing 2025', 'tds tacing 2025', 'nielsen racing 2025', 'inter europol competition 2025',  'clx - pure rxcing 2025', 'vds panis racing 2025', 'af corse 2025',  'ao by tf 2025']],
+        'car_oreca_07_2023': ['Oreca 07 Gibson', [ 'oreca 07', 'prema racing', 'vector sport', 'tower motorsports', 'nielsen racing', 'duqueine team', 'inter europol competition', 'cool racing', 'graff racing', 'algarve pro racing', 'idec sport', 'panis racing', 'racing team turkey', 'crowdstrike', 'ao by tf', 'united autosports', 'alpine elf team', 'team wrt', 'af corse', 'jota', 'proton', 'rlr msport', 'team virage']],
+        'car_oreca_07_2024': ['Oreca 07 Gibson 2024', [ 'prema', 'vector sport 2024', 'tower', 'nielsen racing 2024', 'duqueine team 2024', 'inter europol', 'cool racing 2024', 'graff', 'algarve pro racing 2024', 'crowdstrike racing by apr 2024','panis racing 2024', 'racing team turkey', 'crowdstrike', 'ao by tf 2024', 'united autosports 2024', 'united autosports usa 2024', 'inter europol competition 2024', 'alpine elf team', 'team wrt', 'af corse 2024', 'jota', 'proton competition 2024', 'rlr msport', 'team virage', 'idec sport 2024',  'iron lynx - proton 2025', 'proton competition 2025', 'rlr msport 2025', 'idec sport 2025',  'united autosports 2025',  'nielsen racing', 'algarve pro racing 2025', 'tds tacing 2025', 'nielsen racing 2025', 'inter europol competition 2025',  'clx - pure rxcing 2025', 'vds panis racing 2025', 'af corse 2025',  'ao by tf 2025']],
 
         # --- LMP3 ---
-        'car_ginetta_g61': ['Ginetta G61-LT-P325-Evo', ['ginetta g61', 'dkr engineering',]],
-        'car_ligier_js_p325': ['Ligier JS P325', ['ligier js p325', 'cool racing', 'clx motorsport', 'racing spirit of leman', 'wtm by rinaldi', 'eurointernational', 'rlr msport', 'dkr engineering', 'team virage', 'inter europol', 'ultimate', 'nielsen', 'm racing', 'inter europol competition']],
+        'car_ginetta_g61': ['Ginetta G61-LT-P325-Evo', ['ginetta g61']],
+        'car_ligier_js_p325': ['Ligier JS P325', ['ligier js p325', 'cool racing', 'clx motorsport', 'racing spirit of leman', 'wtm by rinaldi', 'eurointernational', 'rlr msport', 'team virage', 'inter europol', 'ultimate', 'nielsen', 'm racing', 'inter europol competition']],
+        'car_duqueine_d09': ['Duqueine D09 LMP3', ['duqueine d09', 'duqueine', 'lmp3']],
+
+        # --- HYPERCAR ---
+        'car_genesis_hy': ['GMR-001 Genesis Hypercar', ['gmr-001', 'gmr001', 'genesis', 'hypercar']],
 
         # --- GTE ---
         'car_corvette_c8r_gte': ['Chevrolet Corvette C8.R', ['corvette c8.r', 'corvette racing']],
         'car_ferrari_488_gte': ['Ferrari 488 GTE', ['ferrari 488 gte', 'kessell racing', 'jmw motorsport', 'richard mille', 'walkenhorst motorsport', 'af corse']],
-        'car_porsche_911_rsr': ['Porsche 911 RSR-19', ['porsche 911 rsr-19', 'project 1 - ao', 'dempsey-proton racing', 'gr racing', 'proton competition', 'iron lynx', 'iron dames']],
+        'car_porsche_911_rsr': ['Porsche 911 RSR-19', ['porsche 911 rsr-19', 'rsr-19']],
         'car_aston_martin_vantage_gte': ['Aston Martin Vantage GTE', ['vantage gte', 'vantage amr gte', 'ort by tf', 'gmb motorsport', 'dstation racing', 'tf sport', 'the feart of racing',]],
     }
 
@@ -585,6 +581,13 @@ def get_car_asset_and_name(vehicle_name, veh_filename=None):
                 return asset_key, car_real_name
 
     return "lmu_logo_default", vehicle_name 
+
+
+def get_car_asset_and_name(vehicle_name, veh_filename=None, vehicle_class=""):
+    asset, name = _get_car_asset_and_name(vehicle_name, veh_filename, vehicle_class)
+    logger.debug(f"Car asset resolution: vehicle_name={vehicle_name!r} veh_filename={veh_filename!r} vehicle_class={vehicle_class!r} => {asset!r}, {name!r}")
+    return asset, name
+
 
 def get_track_asset_key(name):
     if not name: return 'lmu_logo'
@@ -602,21 +605,8 @@ def get_track_asset_key(name):
     if 'qatar' in clean or 'lusail' in clean: return 'track_qatar' 
     if 'silverstone' in clean: return 'track_silverstone' 
     if 'paul_ricard' in clean or 'ricard' in clean: return 'track_paul_ricard' 
+    if 'barcelona' in clean or 'catalunya' in clean: return 'track_barcelona' 
     return 'lmu_logo'
-
-RANK_ASSETS = {
-    "Bronze": "rank_bronze",
-    "Silver": "rank_silver",
-    "Gold":   "rank_gold",
-    "Platinum": "rank_platinum"
-}
-
-def get_rank_asset(rank_name):
-    if not rank_name: return RANK_ASSETS["Bronze"]
-    for rank, asset in RANK_ASSETS.items():
-        if rank.lower() in rank_name.lower():
-            return asset
-    return RANK_ASSETS["Bronze"]
 
 def get_game_pid():
 
@@ -662,7 +652,7 @@ class LMU_RPC_App(ctk.CTk):
         self.title("")
         self.geometry("420x420")
         self.resizable(False, False)
-        self.protocol("WM_DELETE_WINDOW", self.quit_app)
+        self.protocol("WM_DELETE_WINDOW", self.minimize_to_tray)
         self.configure(fg_color="#0f1012")
 
         try:
@@ -745,9 +735,6 @@ class LMU_RPC_App(ctk.CTk):
 
         self.lbl_large_img = ctk.CTkLabel(self.card_frame, text="", width=90, height=90)
         self.lbl_large_img.place(x=10, y=10)
-
-        self.lbl_small_img = ctk.CTkLabel(self.card_frame, text="", width=30, height=30, bg_color="transparent")
-        self.lbl_small_img.place(x=70, y=70)
 
         self.lbl_card_title = ctk.CTkLabel(self.card_frame, text="Le Mans Ultimate", font=("Segoe UI", 13, "bold"), text_color="white", anchor="w")
         self.lbl_card_title.place(x=110, y=12)
@@ -892,13 +879,6 @@ class LMU_RPC_App(ctk.CTk):
                 
                 if self.start_time is None:
                     self.start_time = time.time()
-            
-                ranks = result.get('ranks', {})
-                sr_class = ranks.get('sr_class', 'Bronze')
-                sr_number = ranks.get('sr_number', 0)
-                
-                small_image_key = get_rank_asset(sr_class)
-                small_text_val = f"SR: {sr_class} {sr_number}"
 
                 if status == 'connected_driving':
                     session_raw = result.get('session', '').lower()
@@ -931,7 +911,7 @@ class LMU_RPC_App(ctk.CTk):
                     
                     state = f"{time_info} | {vehicle_name}"
 
-                    large_image_key, large_text_val = get_car_asset_and_name(vehicle_name, veh_filename)
+                    large_image_key, large_text_val = get_car_asset_and_name(vehicle_name, veh_filename, result.get('vehicle_class', ''))
                 
                 else:
                     details = get_text('menu_details')
@@ -945,9 +925,6 @@ class LMU_RPC_App(ctk.CTk):
                 l_img = self.load_preview_image(large_image_key, (90, 90))
                 self.lbl_large_img.configure(image=l_img)
                 
-                s_img = self.load_preview_image(small_image_key, (30, 30), circular=True)
-                self.lbl_small_img.configure(image=s_img)
-                
                 if self.start_time:
                     elapsed = int(time.time() - self.start_time)
                     mins, secs = divmod(elapsed, 60)
@@ -955,15 +932,14 @@ class LMU_RPC_App(ctk.CTk):
                     time_str = f"{hours:02d}:{mins:02d}:{secs:02d} elapsed" if hours > 0 else f"{mins:02d}:{secs:02d} elapsed"
                     self.lbl_card_timer.configure(text=time_str)
 
-                current_update = (details, state)
+                current_update = (details, state, large_image_key)
                 if current_update != self.last_state:
+                    logger.debug(f"Sending RPC update: details={details!r}, state={state!r}, large_image={large_image_key!r}, large_text={large_text_val!r}")
                     self.rpc.update(
                         details=details,
                         state=state,
                         large_image=large_image_key,
                         large_text=large_text_val,
-                        small_image=small_image_key,
-                        small_text=small_text_val,
                         start=self.start_time,
                         pid=game_pid
                     )
