@@ -27,7 +27,7 @@ Veja como seu status aparecerá no Discord em diferentes situações de jogo:
   <img src="img\preview3.png" alt="Corrida" width="32%">
 </p>
 
-### 🛡️ Safety Rating Dinâmico
+### 🛡️ Safety Rating Dinâmico (Trabalhando)
 O ícone pequeno no canto da imagem reflete automaticamente a sua **Classificação de Segurança (Rank)** atual no jogo. O mod detecta sua licença e exibe o emblema correspondente:
 
 | Bronze | Prata | Ouro | Platina |

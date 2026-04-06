@@ -27,7 +27,7 @@ See how your status will appear on Discord in different game situations:
   <img src="img\preview3.png" alt="Race" width="32%">
 </p>
 
-### 🛡️ Dynamic Safety Rating
+### 🛡️ Dynamic Safety Rating (Working)
 The small icon in the corner of the image automatically reflects your current **Safety Rating (Rank)** in-game. The mod detects your license and displays the corresponding badge:
 
 | Bronze | Silver | Gold | Platinum |
