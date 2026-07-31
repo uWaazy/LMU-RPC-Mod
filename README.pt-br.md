@@ -7,6 +7,9 @@
   </a>
 </div>
 
+> [!WARNING]
+> Este repositório foi abandonado e não receberá mais atualizações. Eu não vou mais mantê-lo porque estou sem tempo.
+
 # LMU RPC Mod
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
