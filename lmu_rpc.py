@@ -43,6 +43,11 @@ except ImportError as e:
     sys.exit(1)
 
 def setup_logging():
+    if hasattr(sys.stdout, 'reconfigure'):
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        except Exception:
+            pass
     logger = logging.getLogger("LMU_RPC")
     logger.setLevel(logging.DEBUG)
     
@@ -123,6 +128,12 @@ TRANSLATIONS = {
         'details': 'P{} • Volta {}/{}',
         'details_time': 'P{} • Restam {}',
         'waiting': 'Aguardando o início da sessão...', 
+        'grid': 'No Grid de Largada',
+        'formation_lap': 'Volta de Apresentação',
+        'countdown': 'Contagem Regressiva',
+        'lap_progress': 'Volta {}/{} (Faltam {})',
+        'lap_single': 'Volta {}',
+        'last_lap': 'Última Volta',
         'menu_details': 'Preparando motores...',
         'lmu_exclusive_data_note': 'Safety Rating: {} | Safety: {} | Badge: {} (Dados LMU simulados)',
         'ui_disconnected': 'DESCONECTADO',
@@ -152,6 +163,12 @@ TRANSLATIONS = {
         'details': 'P{} • Lap {}/{}',
         'details_time': 'P{} • {} left',
         'waiting': 'Waiting for session to start...', 
+        'grid': 'On the Grid',
+        'formation_lap': 'Formation Lap',
+        'countdown': 'Countdown',
+        'lap_progress': 'Lap {}/{} ({} left)',
+        'lap_single': 'Lap {}',
+        'last_lap': 'Final Lap',
         'menu_details': 'Preparing to race...',
         'lmu_exclusive_data_note': 'Safety Rating: {} | Safety: {} | Badge: {} (Simulated LMU data)',
         'ui_disconnected': 'DISCONNECTED',
@@ -181,6 +198,12 @@ TRANSLATIONS = {
         'details': 'P{} • Vuelta {}/{}',
         'details_time': 'P{} • {} restantes',
         'waiting': 'Esperando que comience la sesión...', 
+        'grid': 'En la Parrilla',
+        'formation_lap': 'Vuelta de Formación',
+        'countdown': 'Cuenta Regresiva',
+        'lap_progress': 'Vuelta {}/{} (Faltan {})',
+        'lap_single': 'Vuelta {}',
+        'last_lap': 'Última Vuelta',
         'menu_details': 'Preparándose para correr...',
         'lmu_exclusive_data_note': 'Safety Rating: {} | Safety: {} | Badge: {} (Datos LMU simulados)',
         'ui_disconnected': 'DESCONECTADO',
@@ -229,21 +252,29 @@ class RF2Data:
         return 'menu'
 
     def get_player_ranks(self, vehicle):
-        sr_class = "Bronze"
-        sr_number = 0
+        dr_value = 0.0
+        sr_value = 0.0
+        dr_tier = "N/A"
+        sr_tier = "N/A"
         
         if vehicle:
             try:
-                raw_sr = vehicle.mDriverRating
-                if raw_sr > 0:
-                    sr_number = raw_sr
-                    sr_class = "Silver" if raw_sr >= 1000 else "Bronze"
-            except:
+                dr_value = getattr(vehicle, 'mDriverRating', 0.0) or 0.0
+                sr_value = getattr(vehicle, 'mSafetyRating', 0.0) or 0.0
+            except (AttributeError, TypeError):
                 pass
 
+        # Convert numeric ratings to tier strings
+        dr_tier = rating_to_string(dr_value) if dr_value > 0 else "N/A"
+        sr_tier = rating_to_string(sr_value) if sr_value > 0 else "N/A"
+
         return {
-            'sr_class': sr_class,
-            'sr_number': sr_number
+            'dr_value': dr_value,
+            'sr_value': sr_value,
+            'dr_tier': dr_tier,
+            'sr_tier': sr_tier,
+            'sr_class': sr_tier,
+            'sr_number': sr_value
         }
 
     def _safe_decode(self, raw_bytes):
@@ -320,34 +351,20 @@ class RF2Data:
             "silverstone": "Silverstone",
             "paul ricard": "Paul Ricard",
             "ricard": "Paul Ricard",
+            "barcelona": "Barcelona",
+            "catalunya": "Barcelona",
+            "daytona": "Daytona",
+            "laguna seca": "Laguna Seca",
+            "laguna": "Laguna Seca",
+            "road atlanta": "Road Atlanta",
+            "atlanta": "Road Atlanta",
+            "long beach": "Long Beach",
         }
 
         for key, val in track_map.items():
             if key in s:
                 track_display = val
                 break
-
-        layout_map = {
-            "endurance circuit": "Endurance C.",
-            "outer circuit": "Outer C.",
-            "paddock circuit": "Paddock C.",
-            "mulsanne circuit": "Mulsanne C.",
-            "national circuit": "National C.",
-            "classic circuit": "Classic C.",
-            "short circuit": "Short C.",
-            "curva grande circuit": "Curva Grande C.",
-            "school circuit": "School C.",
-        }
-
-        detected_layouts = []
-        for l_key, l_abbr in layout_map.items():
-            if l_key in s:
-                if l_key == "national circuit" and ("international" in s or "internacional" in s):
-                    continue
-                detected_layouts.append(l_abbr)
-
-        if detected_layouts:
-            return f"{track_display} ({', '.join(detected_layouts)})"
 
         return track_display
 
@@ -504,16 +521,20 @@ def _get_car_asset_and_name(vehicle_name, veh_filename=None, vehicle_class=""):
             "sgc_007_2023": ("car_glickenhaus_007", "Glickenhaus SCG 007"),
             "toyota_gr10_2023": ("car_toyota_gr010", "Toyota GR010-Hybrid"),
             "vandervell_680_2023": ("car_vanwall_680", "Vanwall Vandervell 680"),
+            "oreca_07_2026": ("car_oreca_07_2026", "Oreca 07 Gibson 2025/2026"),
             "vantage_amr_gt3evo_2024": ("car_aston_martin_vantage_gt3", "Aston Martin Vantage GT3"),
             "duqueine_d09_lmp3": ("car_duqueine_d09", "Duqueine D09 LMP3"),
             "duqueine_d09_p3": ("car_duqueine_d09", "Duqueine D09 LMP3"),
             "duqueine_d09": ("car_duqueine_d09", "Duqueine D09 LMP3"),
-            "genesis_gmr_001": ("car_genesis_hy", "GMR-001 Genesis Hypercar"),
-            "genesis_gmr-001": ("car_genesis_hy", "GMR-001 Genesis Hypercar"),
-            "genesis_gmr001": ("car_genesis_hy", "GMR-001 Genesis Hypercar"),
-            "gmr_001_hypercar": ("car_genesis_hy", "GMR-001 Genesis Hypercar"),
-            "gmr-001_hypercar": ("car_genesis_hy", "GMR-001 Genesis Hypercar"),
-            "gmr001_hypercar": ("car_genesis_hy", "GMR-001 Genesis Hypercar"),
+            "genesis_gmr_001": ("car_genesis_gmr001", "Genesis GMR-001 Hypercar"),
+            "genesis_gmr-001": ("car_genesis_gmr001", "Genesis GMR-001 Hypercar"),
+            "genesis_gmr001": ("car_genesis_gmr001", "Genesis GMR-001 Hypercar"),
+            "genesis_hypercar": ("car_genesis_gmr001", "Genesis GMR-001 Hypercar"),
+            "gmr_001_hypercar": ("car_genesis_gmr001", "Genesis GMR-001 Hypercar"),
+            "gmr-001_hypercar": ("car_genesis_gmr001", "Genesis GMR-001 Hypercar"),
+            "gmr001_hypercar": ("car_genesis_gmr001", "Genesis GMR-001 Hypercar"),
+            "gmr_001": ("car_genesis_gmr001", "Genesis GMR-001 Hypercar"),
+            "gmr-001": ("car_genesis_gmr001", "Genesis GMR-001 Hypercar"),
 
         }
 
@@ -561,9 +582,11 @@ def _get_car_asset_and_name(vehicle_name, veh_filename=None, vehicle_class=""):
         'car_ginetta_g61': ['Ginetta G61-LT-P325-Evo', ['ginetta g61']],
         'car_ligier_js_p325': ['Ligier JS P325', ['ligier js p325', 'cool racing', 'clx motorsport', 'racing spirit of leman', 'wtm by rinaldi', 'eurointernational', 'rlr msport', 'team virage', 'inter europol', 'ultimate', 'nielsen', 'm racing', 'inter europol competition']],
         'car_duqueine_d09': ['Duqueine D09 LMP3', ['duqueine d09', 'duqueine', 'lmp3']],
+        'car_oreca_07_2026': ['Oreca 07 Gibson 2025/2026', ['oreca 07', 'prema', 'vector sport', 'tower', 'nielsen racing', 'duqueine team', 'inter europol competition', 'cool racing', 'graff racing', 'algarve pro racing', 'idec sport', 'panis racing', 'racing team turkey', 'crowdstrike', 'ao by tf', 'united autosports', 'alpine elf team', 'team wrt', 'af corse', 'jota', 'proton', 'rlr msport', 'team virage']],
+        'car_adess_03': ['ADESS-03 LMP3', ['adess 03', 'adess', 'adess-03']],
 
         # --- HYPERCAR ---
-        'car_genesis_hy': ['GMR-001 Genesis Hypercar', ['gmr-001', 'gmr001', 'genesis', 'hypercar']],
+        'car_genesis_gmr001': ['Genesis GMR-001 Hypercar', ['genesis', 'gmr-001', 'gmr001', 'gmr 001']],
 
         # --- GTE ---
         'car_corvette_c8r_gte': ['Chevrolet Corvette C8.R', ['corvette c8.r', 'corvette racing']],
@@ -592,21 +615,25 @@ def get_car_asset_and_name(vehicle_name, veh_filename=None, vehicle_class=""):
 def get_track_asset_key(name):
     if not name: return 'lmu_logo'
     clean = name.lower().replace("'", "")
-    if 'le mans' in clean or 'sarthe' in clean: return 'track_lemans'
-    if 'spa' in clean or 'francorchamps' in clean: return 'track_spa'
-    if 'monza' in clean: return 'track_monza'
-    if 'sebring' in clean: return 'track_sebring'
-    if 'bahrain' in clean: return 'track_bahrain'
-    if 'portimao' in clean or 'algarve' in clean: return 'track_portimao'
-    if 'fuji' in clean: return 'track_fuji'
-    if 'imola' in clean: return 'track_imola'
-    if 'cota' in clean or 'americas' in clean: return 'track_cota'
-    if 'interlagos' in clean or 'carlos pace' in clean: return 'track_interlagos'
-    if 'qatar' in clean or 'lusail' in clean: return 'track_qatar' 
-    if 'silverstone' in clean: return 'track_silverstone' 
-    if 'paul_ricard' in clean or 'ricard' in clean: return 'track_paul_ricard' 
-    if 'barcelona' in clean or 'catalunya' in clean: return 'track_barcelona' 
-    return 'lmu_logo'
+    if 'le mans' in clean or 'sarthe' in clean: return 'lemans-sarthe'
+    if 'spa' in clean or 'francorchamps' in clean: return 'spa'
+    if 'monza' in clean: return 'monza'
+    if 'sebring' in clean: return 'sebring'
+    if 'bahrain' in clean: return 'bahrain'
+    if 'portimao' in clean or 'algarve' in clean: return 'portimao'
+    if 'fuji' in clean: return 'fuji'
+    if 'imola' in clean: return 'imola'
+    if 'cota' in clean or 'americas' in clean: return 'cota'
+    if 'interlagos' in clean or 'carlos pace' in clean: return 'interlagos'
+    if 'qatar' in clean or 'lusail' in clean: return 'lusail'
+    if 'silverstone' in clean: return 'silverstone'
+    if 'ricard' in clean: return 'paulricard'
+    if 'barcelona' in clean or 'catalunya' in clean: return 'barcelona-catalunya'
+    if 'daytona' in clean: return 'daytona'
+    if 'laguna' in clean: return 'laguna_seca'
+    if 'atlanta' in clean: return 'roadatlanta'
+    if 'long beach' in clean: return 'longbeach'
+    return None
 
 def get_game_pid():
 
@@ -645,6 +672,177 @@ def resource_path(relative_path):
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("dark-blue")
 
+VALID_BADGES = {
+    "sr-clean", "sr-rookie", "sr-warning", "sr-probation", "sr-saint",
+    "sr-danger", "sr-noob", "content-creator", "early-access",
+    "irl-driver", "s397", "test-driver"
+}
+
+class ToolTip:
+    def __init__(self, widget, text_func):
+        self.widget = widget
+        self.text_func = text_func
+        self.tip_window = None
+        self.widget.bind("<Enter>", self.show_tip)
+        self.widget.bind("<Leave>", self.hide_tip)
+
+    def show_tip(self, event=None):
+        if self.tip_window or not self.text_func:
+            return
+        text = self.text_func() if callable(self.text_func) else str(self.text_func)
+        if not text:
+            return
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + 25
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(tw, text=text, justify=tk.LEFT,
+                         background="#2f3136", foreground="#ffffff",
+                         relief=tk.SOLID, borderwidth=1,
+                         font=("Segoe UI", 9, "normal"), padx=6, pady=4)
+        label.pack(ipadx=1)
+
+    def hide_tip(self, event=None):
+        tw = self.tip_window
+        self.tip_window = None
+        if tw:
+            try:
+                tw.destroy()
+            except Exception:
+                pass
+
+
+
+def rating_to_string(rating_value):
+    """Converte valor numérico de rating para formato de tier (ex: 1 -> 'Silver 1', 3 -> 'Gold 3')"""
+    if isinstance(rating_value, str):
+        return rating_value.strip()
+    try:
+        val = float(rating_value)
+    except (ValueError, TypeError):
+        return str(rating_value)
+    
+    # LMU rating tiers: Bronze < Silver < Gold < Platinum
+    # Based on typical LMU rating ranges
+    if val >= 1000:
+        tier = "Platinum"
+        rank = min(3, max(1, round(val / 333) - 2))
+    elif val >= 600:
+        tier = "Gold"
+        rank = min(3, max(1, round(val / 200) - 1))
+    elif val >= 300:
+        tier = "Silver"
+        rank = min(3, max(1, round(val / 100)))
+    else:
+        tier = "Bronze"
+        rank = min(3, max(1, round(val / 100) + 1))
+    
+    return f"{tier} {rank}"
+
+
+class RaceControlProfile:
+    def __init__(self, config=None):
+        self.config = config or {}
+        self.dr = str(self.config.get("dr", "S1 (64%)")).strip()
+        self.sr = str(self.config.get("sr", "Gold S3 (82%)")).strip()
+        self.badge = str(self.config.get("badge", "sr-clean")).strip()
+        self.last_fetch_time = 0
+        self.lock = threading.Lock()
+        self.dr_value = 0.0
+        self.sr_value = 0.0
+
+    def get_badge_asset(self):
+        with self.lock:
+            b = self.badge.lower().strip()
+            if not b:
+                return "sr-clean"
+            if b.endswith(".png") or b.endswith(".jpg"):
+                b = os.path.splitext(b)[0]
+            clean = b.replace("badge_", "").replace("_", "-")
+            if clean in VALID_BADGES:
+                return clean
+            if b in VALID_BADGES:
+                return b
+            return "sr-clean"
+
+    def get_tooltip(self):
+        with self.lock:
+            dr_val = self.dr if self.dr else "N/A"
+            sr_val = self.sr if self.sr else "N/A"
+            return f"DR: {dr_val} | SR: {sr_val}"
+
+    def update_from_config(self, config):
+        with self.lock:
+            self.config = config
+            if "dr" in config and config["dr"]:
+                self.dr = str(config["dr"]).strip()
+            if "sr" in config and config["sr"]:
+                self.sr = str(config["sr"]).strip()
+            if "badge" in config and config["badge"]:
+                self.badge = str(config["badge"]).strip()
+
+    def refresh_from_api(self):
+        """Consulta assíncrona da API REST interna do LMU (porta 6397) para dados de perfil/ranks se disponíveis."""
+        now = time.time()
+        if now - self.last_fetch_time < 2:
+            return
+        self.last_fetch_time = now
+
+        endpoints = [
+            "http://localhost:6397/rest/profile",
+            "http://localhost:6397/rest/player",
+            "http://localhost:6397/rest/racecontrol/profile",
+            "http://localhost:6397/racecontrol/user"
+        ]
+
+        def _fetch():
+            for url in endpoints:
+                try:
+                    resp = requests.get(url, timeout=1.0)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        logger.debug(f"API profile hit from {url}: {data}")
+                        with self.lock:
+                            if isinstance(data, dict):
+                                if "dr" in data and data["dr"]:
+                                    dr_val = data["dr"]
+                                    self.dr = rating_to_string(dr_val)
+                                elif "driverRating" in data and data["driverRating"]:
+                                    dr_val = data["driverRating"]
+                                    self.dr = rating_to_string(dr_val)
+                                if "sr" in data and data["sr"]:
+                                    sr_val = data["sr"]
+                                    self.sr = rating_to_string(sr_val)
+                                elif "safetyRating" in data and data["safetyRating"]:
+                                    sr_val = data["safetyRating"]
+                                    self.sr = rating_to_string(sr_val)
+                                if "badge" in data and data["badge"]:
+                                    self.badge = str(data["badge"]).strip()
+                        break
+                except Exception:
+                    continue
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def refresh_from_memory(self, result):
+        """Atualiza DR/SR diretamente da memória compartilhada do LMU."""
+        ranks = result.get('ranks', {}) if isinstance(result, dict) else {}
+        if not ranks:
+            return
+        try:
+            dr_val = ranks.get('dr_value', 0.0)
+            sr_val = ranks.get('sr_value', 0.0)
+            if dr_val and dr_val > 0:
+                self.dr_value = float(dr_val)
+                self.dr = rating_to_string(self.dr_value)
+            if sr_val and sr_val > 0:
+                self.sr_value = float(sr_val)
+                self.sr = rating_to_string(self.sr_value)
+        except (ValueError, TypeError):
+            pass
+
+
 class LMU_RPC_App(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -676,6 +874,7 @@ class LMU_RPC_App(ctk.CTk):
         self.img_cache = {}
         
         self.config = self.load_config()
+        self.rc_profile = RaceControlProfile(self.config)
 
         self.setup_ui()
         logger.info("App LMU RPC Mod iniciado. Versão 2.0 (Modern UI)")
@@ -736,6 +935,11 @@ class LMU_RPC_App(ctk.CTk):
         self.lbl_large_img = ctk.CTkLabel(self.card_frame, text="", width=90, height=90)
         self.lbl_large_img.place(x=10, y=10)
 
+        self.lbl_small_img = ctk.CTkLabel(self.card_frame, text="", width=28, height=28, fg_color="transparent")
+        self.lbl_small_img.place(x=74, y=74)
+        self.lbl_small_img.lift()
+        self.badge_tooltip = ToolTip(self.lbl_small_img, self.rc_profile.get_tooltip)
+
         self.lbl_card_title = ctk.CTkLabel(self.card_frame, text="Le Mans Ultimate", font=("Segoe UI", 13, "bold"), text_color="white", anchor="w")
         self.lbl_card_title.place(x=110, y=12)
 
@@ -776,24 +980,39 @@ class LMU_RPC_App(ctk.CTk):
         pil_img = None
         base_path = os.path.dirname(os.path.abspath(__file__))
         
-        candidates = [
-            os.path.join(base_path, "assets", f"{key}.png"),
-            os.path.join(base_path, "assets", f"{key}.jpg"),
+        # Subpastas de assets suportadas: cars, badges, ranks, tracks e raiz de assets
+        subdirs = ["cars", "badges", "ranks", "tracks", ""]
+        candidates = []
+        for subdir in subdirs:
+            folder = os.path.join(base_path, "assets", subdir) if subdir else os.path.join(base_path, "assets")
+            candidates.append(os.path.join(folder, f"{key}.png"))
+            candidates.append(os.path.join(folder, f"{key}.jpg"))
+            res_folder = resource_path(os.path.join("assets", subdir)) if subdir else resource_path("assets")
+            candidates.append(os.path.join(res_folder, f"{key}.png"))
+            candidates.append(os.path.join(res_folder, f"{key}.jpg"))
+
+        candidates.extend([
             os.path.join(base_path, f"{key}.png"),
             os.path.join(base_path, f"{key}.jpg"),
-            os.path.join(base_path, "lmu_logo.png")
-        ]
-        
+            resource_path(f"{key}.png"),
+            resource_path(f"{key}.jpg"),
+            os.path.join(base_path, "assets", "cars", "lmu_logo.png"),
+            os.path.join(base_path, "assets", "lmu_logo.png"),
+            resource_path(os.path.join("assets", "lmu_logo.png")),
+            resource_path("lmu_logo.png")
+        ])
+
         for path in candidates:
             if os.path.exists(path):
                 try:
                     pil_img = Image.open(path)
                     break
-                except: pass
-        
+                except Exception:
+                    pass
+
         if not pil_img:
             pil_img = Image.new('RGB', size, (47, 49, 54))
-        
+
         pil_img = pil_img.resize(size, Image.Resampling.LANCZOS)
 
         if circular:
@@ -802,8 +1021,12 @@ class LMU_RPC_App(ctk.CTk):
             draw.ellipse((0, 0) + size, fill=255)
             
             pil_img = pil_img.convert("RGBA")
-            output = Image.new('RGBA', size, (0,0,0,0))
-            output.paste(pil_img, (0,0), mask)
+            output = Image.new('RGBA', size, (0, 0, 0, 0))
+            output.paste(pil_img, (0, 0), mask)
+            
+            # Borda sutil de 2px estilo Discord
+            border_draw = ImageDraw.Draw(output)
+            border_draw.ellipse((0, 0, size[0] - 1, size[1] - 1), outline=(30, 31, 34, 255), width=2)
             pil_img = output
 
         ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=size)
@@ -841,6 +1064,9 @@ class LMU_RPC_App(ctk.CTk):
         self.lbl_card_details.configure(text="...")
         self.lbl_card_state.configure(text="...")
         self.lbl_card_timer.configure(text="00:00 elapsed")
+        self.lbl_large_img.configure(image=self.load_preview_image("lmu_logo", (90, 90)))
+        self.lbl_small_img.configure(image="")
+        self.lbl_small_img.place_forget()
         self.btn_start.configure(state="normal")
         self.btn_stop.configure(state="disabled")
         self.start_time = None
@@ -858,11 +1084,16 @@ class LMU_RPC_App(ctk.CTk):
                 
                 if self.last_state != 'clear':
                     logger.info("Desconectado/Jogo fechado.")
-                    if self.rpc: self.rpc.clear()
+                    if self.rpc:
+                        try:
+                            self.rpc.clear()
+                        except: pass
                     self.start_time = None
                     self.last_state = 'clear'
                     self.lbl_card_details.configure(text="Waiting...")
                     self.lbl_card_state.configure(text="")
+                    self.lbl_large_img.configure(image=self.load_preview_image("lmu_logo", (90, 90)))
+                    self.lbl_small_img.place_forget()
                 self.after(1000, self.update_loop)
                 return
 
@@ -872,8 +1103,11 @@ class LMU_RPC_App(ctk.CTk):
             if status == 'game_closed':
                 status = 'connected_menu'
                 result = {'status': 'connected_menu', 'session': 'menu', 'track_name': '', 'ranks': self.rf2.get_player_ranks(None)}
+                self.rc_profile.refresh_from_memory(result)
 
             if status in ['connected_menu', 'connected_driving']:
+                self.rc_profile.refresh_from_api()
+                self.rc_profile.refresh_from_memory(result)
                 self.lbl_status.configure(text=get_text('ui_connected_lmu'), text_color="#00FF00") 
                 self.lbl_substatus.configure(text=get_text('ui_sending_rp'))
                 
@@ -890,40 +1124,84 @@ class LMU_RPC_App(ctk.CTk):
                     
                     session_display = get_text(session_raw)
                     
-                    lap = result['lap']
-                    total_laps = result['total_laps']
-                    is_time_based = result['end_et'] > 0 and total_laps > 1000
+                    game_phase = result.get('game_phase', 5)
+                    current_et = result.get('current_et', 0.0)
+                    end_et = result.get('end_et', 0.0)
+                    lap = max(1, result.get('lap', 1))
+                    total_laps = result.get('total_laps', 0)
 
                     time_info = ""
-                    if is_time_based:
-                        time_left = result['end_et'] - result['current_et']
-                        if time_left > 0:
-                            hours, rem = divmod(time_left, 3600)
-                            mins, secs = divmod(rem, 60)
-                            time_str = f"{int(hours)}:{int(mins):02d}" if hours > 0 else f"{int(mins):02d}:{int(secs):02d}"
-                            time_info = get_text('time_remaining', time_str)
-                        else:
-                            time_info = f"Lap {lap}/{total_laps}"
+                    if game_phase == 0:
+                        time_info = get_text('waiting')
+                    elif game_phase in (1, 2):
+                        time_info = get_text('grid')
+                    elif game_phase == 3:
+                        time_info = get_text('formation_lap')
+                    elif game_phase == 4:
+                        time_info = get_text('countdown')
                     else:
-                        time_info = f"Lap {lap}/{total_laps}"
+                        has_valid_timer = 0 < end_et < 172800
+                        time_left = end_et - current_et if has_valid_timer else 0
+
+                        if has_valid_timer and time_left > 0 and (total_laps >= 1000 or total_laps <= 0):
+                            hours, rem = divmod(int(time_left), 3600)
+                            mins, secs = divmod(rem, 60)
+                            time_str = f"{hours}:{mins:02d}:{secs:02d}" if hours > 0 else f"{mins:02d}:{secs:02d}"
+                            time_info = get_text('time_remaining', time_str)
+                        elif 0 < total_laps < 1000:
+                            laps_left = max(0, total_laps - lap + 1)
+                            if laps_left <= 1:
+                                time_info = get_text('last_lap')
+                            else:
+                                time_info = get_text('lap_progress', lap, total_laps, laps_left)
+                        elif has_valid_timer and time_left <= 0 and (total_laps >= 1000 or total_laps <= 0):
+                            if session_raw == 'race':
+                                time_info = get_text('last_lap')
+                            else:
+                                time_info = get_text('lap_single', lap)
+                        else:
+                            time_info = get_text('lap_single', lap)
 
                     details = f"P{pos} | {track_name} | {session_display}"
-                    
                     state = f"{time_info} | {vehicle_name}"
 
-                    large_image_key, large_text_val = get_car_asset_and_name(vehicle_name, veh_filename, result.get('vehicle_class', ''))
+                    car_asset, car_real_name = get_car_asset_and_name(vehicle_name, veh_filename, result.get('vehicle_class', ''))
+                    track_asset = get_track_asset_key(track_name)
+                    cycle_enabled = self.config.get("cycle_track_image", False)
+                    cycle_toggle = (int(time.time()) // 5) % 2 == 1 if cycle_enabled else False
+
+                    # Alterna a cada 5 segundos entre carro e pista (respeitando rate limit do Discord IPC)
+                    if cycle_enabled and track_asset is not None and cycle_toggle:
+                        large_image_key = track_asset
+                        large_text_val = track_name
+                    else:
+                        large_image_key = car_asset
+                        large_text_val = car_real_name
+
+                    small_image_key = self.rc_profile.get_badge_asset()
+                    small_text_val = self.rc_profile.get_tooltip()
                 
                 else:
                     details = get_text('menu_details')
                     state = get_text('menu') 
                     large_image_key = "lmu_logo"
                     large_text_val = "Le Mans Ultimate"
+                    small_image_key = self.rc_profile.get_badge_asset()
+                    small_text_val = self.rc_profile.get_tooltip()
                 
                 self.lbl_card_details.configure(text=details)
                 self.lbl_card_state.configure(text=state)
                 
                 l_img = self.load_preview_image(large_image_key, (90, 90))
                 self.lbl_large_img.configure(image=l_img)
+
+                if small_image_key:
+                    s_img = self.load_preview_image(small_image_key, (28, 28), circular=True)
+                    self.lbl_small_img.configure(image=s_img)
+                    self.lbl_small_img.place(x=74, y=74)
+                    self.lbl_small_img.lift()
+                else:
+                    self.lbl_small_img.place_forget()
                 
                 if self.start_time:
                     elapsed = int(time.time() - self.start_time)
@@ -932,18 +1210,26 @@ class LMU_RPC_App(ctk.CTk):
                     time_str = f"{hours:02d}:{mins:02d}:{secs:02d} elapsed" if hours > 0 else f"{mins:02d}:{secs:02d} elapsed"
                     self.lbl_card_timer.configure(text=time_str)
 
-                current_update = (details, state, large_image_key)
+                current_update = (details, state, large_image_key, small_image_key, small_text_val)
                 if current_update != self.last_state:
-                    logger.debug(f"Sending RPC update: details={details!r}, state={state!r}, large_image={large_image_key!r}, large_text={large_text_val!r}")
-                    self.rpc.update(
-                        details=details,
-                        state=state,
-                        large_image=large_image_key,
-                        large_text=large_text_val,
-                        start=self.start_time,
-                        pid=game_pid
-                    )
-                    self.last_state = current_update
+                    logger.debug(f"Sending RPC update: details={details!r}, state={state!r}, large_image={large_image_key!r}, small_image={small_image_key!r}, small_text={small_text_val!r}")
+                    try:
+                        update_payload = {
+                            "details": details,
+                            "state": state,
+                            "large_image": large_image_key,
+                            "large_text": large_text_val,
+                            "start": self.start_time,
+                            "pid": game_pid
+                        }
+                        if small_image_key and small_text_val:
+                            update_payload["small_image"] = small_image_key
+                            update_payload["small_text"] = small_text_val
+
+                        self.rpc.update(**update_payload)
+                        self.last_state = current_update
+                    except Exception as rpc_e:
+                        logger.error(f"Erro ao enviar update para Discord RPC: {rpc_e}")
 
         except Exception as e:
             logger.error(f"Erro no loop principal: {e}", exc_info=True)
@@ -973,12 +1259,23 @@ class LMU_RPC_App(ctk.CTk):
         sys.exit(0)
 
     def load_config(self):
+        default_config = {
+            "autostart": False,
+            "steamid": "76561198989955397",
+            "dr": "S1 (64%)",
+            "sr": "Gold S3 (82%)",
+            "badge": "sr-clean",
+            "cycle_track_image": False
+        }
         if os.path.exists("config.json"):
             try:
-                with open("config.json", "r") as f:
-                    return json.load(f)
-            except: pass
-        return {"autostart": False}
+                with open("config.json", "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    default_config.update(data)
+                    return default_config
+            except Exception:
+                pass
+        return default_config
 
     def save_config(self):
         try:
