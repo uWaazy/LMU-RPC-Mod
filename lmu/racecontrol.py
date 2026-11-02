@@ -1,5 +1,5 @@
 """
-lmu_racecontrol.py - Driver Rating (DR), Safety Rating (SR) e Driver Badge para o LMU RPC Mod.
+lmu/racecontrol.py - Driver Rating (DR), Safety Rating (SR) e Driver Badge para o LMU RPC Mod.
 
 O QUE FOI COMPROVADO NO CODIGO (ver RELATORIO_RACECONTROL.md):
   * A Shared Memory do LMU (LMUVehicleScoring) NAO tem DR, SR nem badge. So tem `mSteamID`
@@ -60,7 +60,7 @@ BADGE_LABELS = {
     BADGE_PROBATION: "Probation",
 }
 
-# Chaves de imagem do Discord que JA existem no seu app (ver VALID_BADGES antigo do lmu_rpc.py).
+# Chaves de imagem do Discord que JA existem no seu app (ver VALID_BADGES antigo do lmu/app.py).
 # ATENCAO: o mapeamento nome-oficial -> arte e uma SUPOSICAO (nao ha como verificar a arte pelo
 # codigo). Ajuste em config.json -> "racecontrol" -> "badge_assets" se algum estiver trocado.
 DEFAULT_BADGE_ASSETS = {
@@ -416,7 +416,7 @@ class LocalRestProvider(_HttpProvider):
 
     NENHUMA URL vem por padrao: os caminhos que o codigo antigo tentava (/rest/profile,
     /rest/player, /rest/racecontrol/profile) nao existem em nenhum projeto de referencia.
-    Use `python lmu_racecontrol.py --probe-local` para descobrir o que o SEU jogo responde.
+    Use `python -m lmu.racecontrol --probe-local` para descobrir o que o SEU jogo responde.
     """
 
     name = "local_rest"
@@ -1018,7 +1018,7 @@ class RaceControlService:
 
 
 # --------------------------------------------------------------------------------------
-# Adaptador usado pelo lmu_rpc.py (mesma interface do antigo RaceControlProfile)
+# Adaptador usado pelo lmu/app.py (mesma interface do antigo RaceControlProfile)
 # --------------------------------------------------------------------------------------
 
 DEFAULT_RACEOS_CONFIG = {"enabled": False, "host": "raceos.gg", "chunk_size": 20}
@@ -1070,7 +1070,7 @@ def build_service(config: Optional[Dict[str, Any]] = None, session: Any = None, 
 
 
 class RaceControlProfile:
-    """Fachada para o lmu_rpc.py. Substitui a antiga classe de mesmo nome (que lia campos
+    """Fachada para o lmu/app.py. Substitui a antiga classe de mesmo nome (que lia campos
     inexistentes da Shared Memory e chamava URLs adivinhadas)."""
 
     def __init__(self, config: Optional[Dict[str, Any]] = None, service: Optional[RaceControlService] = None):
@@ -1105,6 +1105,12 @@ class RaceControlProfile:
         if not p or not p.badge:
             return ""
         return self._assets.get(p.badge) or (p.badge if p.badge in EXTRA_BADGE_SLUGS else "")
+
+    def get_rank_letter(self) -> str:
+        """Letra do rank do DR real (B/S/G/P); '' se nao ha DR ou e 'Pro'."""
+        p = self._local()
+        rank = getattr(getattr(p, "dr", None), "rank", "") if p else ""
+        return rank if rank in ("B", "S", "G", "P") else ""
 
     def get_tooltip(self) -> str:
         """Texto do small_text do Discord (max 128). Vazio se nao houver NENHUM dado real."""
@@ -1174,7 +1180,7 @@ def _cli(argv: List[str]) -> int:  # pragma: no cover - usa o jogo
     import sys
 
     logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
-    here = os.path.dirname(os.path.abspath(__file__))
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # raiz do projeto
     sys.path.append(os.path.join(here, "pyLMUSharedMemory"))
     if "--probe-local" in argv:
         import requests
@@ -1277,7 +1283,7 @@ def _cli(argv: List[str]) -> int:  # pragma: no cover - usa o jogo
         svc._run_async = False
         print(svc.refresh(steam_id))
         return 0
-    print("Uso: python lmu_racecontrol.py [--raceos | --list-endpoints | --probe-local | --diagnose-shm | --lookup STEAMID]")
+    print("Uso: python -m lmu.racecontrol [--raceos | --list-endpoints | --probe-local | --diagnose-shm | --lookup STEAMID]")
     return 1
 
 

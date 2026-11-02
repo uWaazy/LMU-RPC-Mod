@@ -1,4 +1,4 @@
-"""lmu_core.py - nucleo COMPARTILHADO entre o app original (lmu_rpc.py) e o preview (lmu_preview.py).
+"""lmu/core.py - nucleo COMPARTILHADO entre o app original (lmu/app.py) e o preview (lmu/preview.py).
 
 Tudo que define COMO o status aparece no Discord fica aqui, sem dependencia de GUI nem de Shared Memory:
   * idioma e textos (TRANSLATIONS / get_text)
@@ -14,8 +14,8 @@ import locale
 import logging
 import unicodedata
 
-from car_resolver import resolve_car, MODEL_TABLE, KEYWORD_FALLBACK
-from game_mode import party_size
+from lmu.cars import resolve_car, MODEL_TABLE, KEYWORD_FALLBACK
+from lmu.game_mode import party_size
 
 logger = logging.getLogger("LMU_RPC")
 
@@ -65,7 +65,7 @@ TRANSLATIONS = {
     'pt-br': {
         'test_day': 'Dia de Teste',
         'practice': 'Treino Livre',
-        'qualify': 'Qualificação',
+        'qualify': 'Classificação',
         'warmup': 'Aquecimento',
         'race': 'Corrida',
         'menu': 'No Menu Principal',
@@ -84,7 +84,10 @@ TRANSLATIONS = {
         'last_lap': 'Última Volta',
         'menu_details': 'Preparando motores...',
         'mode_online': 'Online',
+        'mode_coop': 'Co-op',
         'mode_weekend': 'Fim de Semana',
+        'tray_open': 'Abrir',
+        'tray_quit': 'Fechar',
         'ui_disconnected': 'DESCONECTADO',
         'ui_service_stopped': 'Serviço Parado',
         'ui_start_rpc': 'INICIAR RPC',
@@ -97,7 +100,16 @@ TRANSLATIONS = {
         'ui_waiting_game_sub': 'Aguardando Jogo...',
         'ui_connection_error': 'Erro de Conexão',
         'ui_connection_error_msg': 'Não foi possível conectar ao Discord.\nVerifique se o Discord está aberto.\n\nErro: {}',
-        'ui_autostart': 'Iniciar com o Windows'
+        'ui_autostart': 'Iniciar com o Windows',
+        'ui_options': 'Opções',
+        'ui_close': 'Fechar',
+        'ui_large_image': 'Imagem grande',
+        'ui_small_icon': 'Ícone pequeno',
+        'ui_opt_alternate': 'Alternar',
+        'ui_opt_car': 'Carro',
+        'ui_opt_track': 'Pista',
+        'ui_opt_badge': 'Badge',
+        'ui_opt_rank': 'Patente'
     },
     'en': {
         'test_day': 'Test Day',
@@ -121,7 +133,10 @@ TRANSLATIONS = {
         'last_lap': 'Final Lap',
         'menu_details': 'Preparing to race...',
         'mode_online': 'Online',
+        'mode_coop': 'Co-op',
         'mode_weekend': 'Race Weekend',
+        'tray_open': 'Open',
+        'tray_quit': 'Exit',
         'ui_disconnected': 'DISCONNECTED',
         'ui_service_stopped': 'Service Stopped',
         'ui_start_rpc': 'START RPC',
@@ -134,7 +149,16 @@ TRANSLATIONS = {
         'ui_waiting_game_sub': 'Waiting for Game...',
         'ui_connection_error': 'Connection Error',
         'ui_connection_error_msg': 'Could not connect to Discord.\nCheck if Discord is open.\n\nError: {}',
-        'ui_autostart': 'Start with Windows'
+        'ui_autostart': 'Start with Windows',
+        'ui_options': 'Options',
+        'ui_close': 'Close',
+        'ui_large_image': 'Large image',
+        'ui_small_icon': 'Small icon',
+        'ui_opt_alternate': 'Alternate',
+        'ui_opt_car': 'Car',
+        'ui_opt_track': 'Track',
+        'ui_opt_badge': 'Badge',
+        'ui_opt_rank': 'Rank'
     },
     'es': {
         'test_day': 'Día de Pruebas',
@@ -158,7 +182,10 @@ TRANSLATIONS = {
         'last_lap': 'Última Vuelta',
         'menu_details': 'Preparándose para correr...',
         'mode_online': 'Online',
+        'mode_coop': 'Cooperativo',
         'mode_weekend': 'Fin de Semana',
+        'tray_open': 'Abrir',
+        'tray_quit': 'Salir',
         'ui_disconnected': 'DESCONECTADO',
         'ui_service_stopped': 'Servicio Detenido',
         'ui_start_rpc': 'INICIAR RPC',
@@ -170,8 +197,17 @@ TRANSLATIONS = {
         'ui_connected_discord': 'CONECTADO A DISCORD',
         'ui_waiting_game_sub': 'Esperando Juego...',
         'ui_connection_error': 'Error de Conexión',
-        'ui_connection_error_msg': 'No se pudo conectar a Discord.\nVerifique si Discord está abierto.\n\nError: {}',
-        'ui_autostart': 'Iniciar con Windows'
+        'ui_connection_error_msg': 'No se pudo conectar a Discord.\nComprueba si Discord está abierto.\n\nError: {}',
+        'ui_autostart': 'Iniciar con Windows',
+        'ui_options': 'Opciones',
+        'ui_close': 'Cerrar',
+        'ui_large_image': 'Imagen grande',
+        'ui_small_icon': 'Icono pequeño',
+        'ui_opt_alternate': 'Alternar',
+        'ui_opt_car': 'Coche',
+        'ui_opt_track': 'Pista',
+        'ui_opt_badge': 'Badge',
+        'ui_opt_rank': 'Rango'
     }
 }
 
@@ -375,14 +411,14 @@ TRACKS = [
 ]
 
 SESSIONS = ('test_day', 'practice', 'qualify', 'warmup', 'race')
-GAME_MODES = ('online', 'weekend')
+GAME_MODES = ('online', 'coop', 'weekend')
 
 
 # ----------------------------------------------------------------------------------------------
 # Catalogo (usado pelo preview): tudo que o app sabe nomear, sem duplicar listas
 # ----------------------------------------------------------------------------------------------
 def list_cars():
-    """[(asset, nome)] sem repeticao, na ordem: tabela do car_resolver, pastas .veh, nomes de equipe, palavras-chave."""
+    """[(asset, nome)] sem repeticao, na ordem: tabela de lmu/cars.py, pastas .veh, nomes de equipe, palavras-chave."""
     seen, out = set(), []
 
     def add(asset, name):
@@ -403,14 +439,87 @@ def list_cars():
     return out
 
 
+# ----------------------------------------------------------------------------------------------
+# Icones de patente (DR) em assets/ranks: bronze / prata / ouro / platina
+# ----------------------------------------------------------------------------------------------
+RANK_KEYWORDS = {'B': ('bronze', 'bronz'), 'S': ('silver', 'prata'), 'G': ('gold', 'ouro'), 'P': ('platinum', 'platina')}
+DEFAULT_RANK_ASSETS = {'B': 'rank_bronze', 'S': 'rank_silver', 'G': 'rank_gold', 'P': 'rank_platinum'}
+
+
+def rank_asset_keys(base_dir, overrides=None):
+    """letra do rank (B/S/G/P) -> chave do asset. Procura em assets/ranks (ou assets/ranked) arquivos com
+    bronze/silver/gold/platinum (ou prata/ouro/platina) no nome; o que nao achar usa DEFAULT_RANK_ASSETS.
+    `overrides` (config racecontrol.rank_assets) manda em tudo. Chaves em minusculas (o Discord ignora maiusculas)."""
+    found = {}
+    for sub in ('ranks', 'ranked'):
+        for key in scan_asset_keys(base_dir, sub):
+            low = key.lower()
+            for letter, words in RANK_KEYWORDS.items():
+                if letter not in found and any(w in low for w in words):
+                    found[letter] = low
+    merged = {**DEFAULT_RANK_ASSETS, **found}
+    for letter, key in (overrides or {}).items():
+        if letter in merged and isinstance(key, str) and key.strip():
+            merged[letter] = key.strip()
+    return merged
+
+
+LARGE_MODES = ('auto', 'car', 'track')
+SMALL_MODES = ('auto', 'badge', 'rank')
+
+
+def large_image_mode(config):
+    """Imagem grande: 'auto' (alterna carro/pista), 'car' ou 'track'. Configs antigas so tinham cycle_track_image."""
+    mode = (config or {}).get('large_image_mode')
+    if mode in LARGE_MODES:
+        return mode
+    return 'auto' if (config or {}).get('cycle_track_image', True) else 'car'
+
+
+def mode_labels(kind):
+    """{valor: texto no idioma atual} para as opcoes da janela. kind: 'large' ou 'small'."""
+    if kind == 'large':
+        return {'auto': get_text('ui_opt_alternate'), 'car': get_text('ui_opt_car'), 'track': get_text('ui_opt_track')}
+    return {'auto': get_text('ui_opt_alternate'), 'badge': get_text('ui_opt_badge'), 'rank': get_text('ui_opt_rank')}
+
+
+def mode_from_label(kind, label, default='auto'):
+    for value, text in mode_labels(kind).items():
+        if text == label:
+            return value
+    return default
+
+
+def pick_small_image(badge_asset, rank_asset, config, now):
+    """Icone pequeno: alterna badge <-> rank a cada `cycle_badge_seconds` (15 s). So alterna se existirem os dois."""
+    mode = config.get('small_image_mode', 'auto')
+    if mode == 'badge':
+        return badge_asset or ''
+    if mode == 'rank':
+        return rank_asset or ''
+    if not (badge_asset and rank_asset):
+        return badge_asset or rank_asset or ''
+    if not config.get('cycle_rank_image', True):
+        return badge_asset
+    try:
+        secs = max(3, int(config.get('cycle_badge_seconds', 15)))
+    except (TypeError, ValueError):
+        secs = 15
+    return rank_asset if (int(now) // secs) % 2 == 1 else badge_asset
+
+
 def list_tracks():
     return list(TRACKS)
 
 
 def scan_asset_keys(base_dir, subdir):
     """Chaves (nome do arquivo sem extensao) em assets/<subdir>. Serve para testar imagem nova antes de mapear."""
-    folder = os.path.join(base_dir, "assets", subdir)
+    assets = os.path.join(base_dir, "assets")
+    folder = os.path.join(assets, subdir)
     try:
+        if subdir and not os.path.isdir(folder):          # pasta com outra caixa: 'Ranked' x 'ranked'
+            match = next((d for d in os.listdir(assets) if d.lower() == subdir.lower()), None)
+            folder = os.path.join(assets, match) if match else folder
         names = sorted(os.listdir(folder))
     except OSError:
         return []
@@ -472,7 +581,7 @@ def build_time_info(result, session_raw):
     return get_text('lap_single', lap)
 
 
-def build_presence(result, config, now, badge_asset="", badge_text=""):
+def build_presence(result, config, now, badge_asset="", badge_text="", rank_asset=""):
     """Status de quem esta NA PISTA. `result` tem o formato de RF2Data.update() (status connected_driving).
 
     Chaves opcionais so do preview: car_asset / car_name / track_asset (pulam a resolucao) e
@@ -508,9 +617,9 @@ def build_presence(result, config, now, badge_asset="", badge_text=""):
             result.get('vehicle_model', ''), result.get('vehicle_year', ''))
     track_asset = result.get('track_asset') or get_track_asset_key(track_name)
 
-    image_mode = result.get('image_mode', 'auto')
+    image_mode = result.get('image_mode') or large_image_mode(config)
     if image_mode == 'auto':
-        cycle_enabled = config.get("cycle_track_image", True)
+        cycle_enabled = True
         try:
             car_secs = max(3, int(config.get("cycle_car_seconds", 10)))
             track_secs = max(3, int(config.get("cycle_track_seconds", 5)))
@@ -529,13 +638,13 @@ def build_presence(result, config, now, badge_asset="", badge_text=""):
     return {
         "details": details, "state": state,
         "large_image": large_image, "large_text": large_text,
-        "small_image": badge_asset, "small_text": badge_text,
+        "small_image": pick_small_image(badge_asset, rank_asset, config, now), "small_text": badge_text,
     }
 
 
-def build_menu_presence(badge_asset="", badge_text=""):
+def build_menu_presence(badge_asset="", badge_text="", rank_asset="", config=None, now=0):
     return {
         "details": get_text('menu_details'), "state": get_text('menu'),
         "large_image": "lmu_logo", "large_text": "Le Mans Ultimate",
-        "small_image": badge_asset, "small_text": badge_text,
+        "small_image": pick_small_image(badge_asset, rank_asset, config or {}, now), "small_text": badge_text,
     }

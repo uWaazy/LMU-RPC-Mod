@@ -1,11 +1,15 @@
-# Somente o necessario para rodar:  python lmu_preview.py
 /*
 !/lmu_preview.py
-!/lmu_core.py
-!/lmu_ui.py
-!/lmu_racecontrol.py
-!/car_resolver.py
-!/game_mode.py
+!/lmu/
+/lmu/*
+!/lmu/__init__.py
+!/lmu/paths.py
+!/lmu/core.py
+!/lmu/cars.py
+!/lmu/game_mode.py
+!/lmu/racecontrol.py
+!/lmu/ui.py
+!/lmu/preview.py
 !/assets/
 !/icon.ico
 !/preview.png

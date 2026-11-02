@@ -1,18 +1,13 @@
-"""lmu_ui.py - utilitarios de interface usados pelo preview (imagens dos assets, tooltip, caminhos)."""
+"""lmu/ui.py - utilitarios de interface usados pelo preview (imagens dos assets, tooltip, caminhos)."""
 import os
-import sys
 import tkinter as tk
 
 from PIL import Image, ImageDraw
 import customtkinter as ctk
 
+from lmu.paths import ROOT, resource_path  # noqa: F401  (resource_path e reexportado)
 
-def resource_path(relative_path):
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_path, relative_path)
+
 
 
 class ToolTip:
@@ -46,14 +41,14 @@ class ToolTip:
                 pass
 
 
-ASSET_SUBDIRS = ("cars", "badges", "ranks", "tracks", "")
+ASSET_SUBDIRS = ("cars", "badges", "ranks", "ranked", "tracks", "")
 
 
 class ImageCache:
     """Carrega imagens de assets/<cars|badges|ranks|tracks>/<chave>.png|jpg (a mesma busca do app original)."""
 
     def __init__(self, base_dir=None):
-        self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
+        self.base_dir = base_dir or ROOT
         self.cache = {}
 
     def find(self, key):
