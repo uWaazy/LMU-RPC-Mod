@@ -103,6 +103,16 @@ TRANSLATIONS = {
         'ui_autostart': 'Iniciar com o Windows',
         'ui_options': 'Opções',
         'ui_close': 'Fechar',
+        'ui_update_title': 'Atualização disponível',
+        'ui_update_text': 'O LMU RPC Mod {version} já está disponível.',
+        'ui_update_footer': '⬇ {version} disponível · clique para atualizar',
+        'ui_update_now': 'Atualizar agora',
+        'ui_update_later': 'Depois',
+        'ui_update_downloading': 'Baixando atualização… {pct}%',
+        'ui_update_installing': 'Instalando e reiniciando…',
+        'ui_update_failed': 'Falha na atualização. Abrindo a página da versão…',
+        'ui_check_updates': 'Verificar atualizações',
+        'ui_minimize_to_tray': 'Minimizar para a bandeja ao fechar',
         'ui_large_image': 'Imagem grande',
         'ui_small_icon': 'Ícone pequeno',
         'ui_opt_alternate': 'Alternar',
@@ -152,6 +162,16 @@ TRANSLATIONS = {
         'ui_autostart': 'Start with Windows',
         'ui_options': 'Options',
         'ui_close': 'Close',
+        'ui_update_title': 'Update available',
+        'ui_update_text': 'LMU RPC Mod {version} is now available.',
+        'ui_update_footer': '⬇ {version} available · click to update',
+        'ui_update_now': 'Update now',
+        'ui_update_later': 'Later',
+        'ui_update_downloading': 'Downloading update… {pct}%',
+        'ui_update_installing': 'Installing and restarting…',
+        'ui_update_failed': 'Update failed. Opening the release page…',
+        'ui_check_updates': 'Check for updates',
+        'ui_minimize_to_tray': 'Minimize to tray on close',
         'ui_large_image': 'Large image',
         'ui_small_icon': 'Small icon',
         'ui_opt_alternate': 'Alternate',
@@ -201,6 +221,16 @@ TRANSLATIONS = {
         'ui_autostart': 'Iniciar con Windows',
         'ui_options': 'Opciones',
         'ui_close': 'Cerrar',
+        'ui_update_title': 'Actualización disponible',
+        'ui_update_text': 'LMU RPC Mod {version} ya está disponible.',
+        'ui_update_footer': '⬇ {version} disponible · haz clic para actualizar',
+        'ui_update_now': 'Actualizar ahora',
+        'ui_update_later': 'Más tarde',
+        'ui_update_downloading': 'Descargando actualización… {pct}%',
+        'ui_update_installing': 'Instalando y reiniciando…',
+        'ui_update_failed': 'Error al actualizar. Abriendo la página de la versión…',
+        'ui_check_updates': 'Buscar actualizaciones',
+        'ui_minimize_to_tray': 'Minimizar a la bandeja al cerrar',
         'ui_large_image': 'Imagen grande',
         'ui_small_icon': 'Icono pequeño',
         'ui_opt_alternate': 'Alternar',
@@ -212,9 +242,11 @@ TRANSLATIONS = {
 }
 
 
-def get_text(key, *args):
+def get_text(key: str, *args) -> str:
     lang = TRANSLATIONS.get(LANGUAGE, TRANSLATIONS['en'])
     text = lang.get(key, TRANSLATIONS['en'].get(key, key))
+    if text is None:
+        text = str(key)
     if args:
         return text.format(*args)
     return text
@@ -642,7 +674,7 @@ def build_presence(result, config, now, badge_asset="", badge_text="", rank_asse
     }
 
 
-def build_menu_presence(badge_asset="", badge_text="", rank_asset="", config=None, now=0):
+def build_menu_presence(badge_asset="", badge_text="", rank_asset="", config=None, now: float = 0.0):
     return {
         "details": get_text('menu_details'), "state": get_text('menu'),
         "large_image": "lmu_logo", "large_text": "Le Mans Ultimate",

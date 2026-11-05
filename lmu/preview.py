@@ -290,10 +290,10 @@ PHASES = (5, 0, 1, 3, 4)
 
 
 def launch():
+    import tkinter as tk
     import tkinter.messagebox
     try:
-        import tkinter as tk
-        from pypresence import Presence
+        from pypresence import Presence  # type: ignore
         from PIL import Image, ImageTk
         import customtkinter as ctk
         from lmu.ui import ImageCache, ToolTip, resource_path
@@ -522,7 +522,7 @@ def launch():
             label(L["lang"])
             to_label = {k: l for k, l in langs}
             to_key = {l: k for k, l in langs}
-            lv = ctk.StringVar(value=to_label.get(self.model.get("language"), L["auto"]))
+            lv = ctk.StringVar(value=to_label.get(str(self.model.get("language") or ""), L["auto"]))
             lv.trace_add("write", lambda *_a: self.on_language(to_key.get(lv.get(), "")))
             ctk.CTkOptionMenu(self.editor, variable=lv, values=[l for _k, l in langs], width=190).grid(row=self.row, column=1, sticky="e", padx=8, pady=4)
             self.row += 1
@@ -606,7 +606,7 @@ def launch():
                 if self.images.missing(key):
                     notes.append(self.L["missing"].format(key))
             self.lbl_warn.configure(text="\n".join(notes))
-            self.send(p)
+            self.send_presence(p)
 
         def update_timer(self, now):
             if self.start_time:
@@ -670,7 +670,7 @@ def launch():
             self.btn_stop.configure(state="disabled")
             self.update_timer(time.time())
 
-        def send(self, presence):
+        def send_presence(self, presence):
             if not (self.running and self.rpc):
                 return
             payload = discord_payload(presence, self.start_time)

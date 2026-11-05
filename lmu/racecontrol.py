@@ -423,6 +423,9 @@ class ProfileProvider:
     def fetch_many(self, keys: List[str]) -> Dict[str, Optional[DriverProfile]]:
         return {k: self.fetch(k) for k in keys}
 
+    def set_local_name(self, name: str) -> None:
+        pass
+
 
 class ManualProvider(ProfileProvider):
     """Valores digitados pelo usuario (config.json: dr, sr, badge). Apenas para o jogador local."""
@@ -615,7 +618,8 @@ def parse_raceos_record(record: Any, source: str = "raceos") -> Optional[DriverP
     """
     if not isinstance(record, dict):
         return None
-    profile = record.get("profile") if isinstance(record.get("profile"), dict) else {}
+    prof_val = record.get("profile")
+    profile = prof_val if isinstance(prof_val, dict) else {}
     raw_badge = profile.get("badge")
     badge = normalize_badge(raw_badge)
     if raw_badge and badge is None and raw_badge not in _warned_badges:
@@ -772,8 +776,8 @@ class RaceOSProvider(ProfileProvider):
         return [r for r in data if isinstance(r, dict)] if isinstance(data, list) else []
 
     # -- interface --
-    def fetch(self, key: str) -> Optional[DriverProfile]:
-        return self.fetch_many([key]).get(key)
+    def fetch(self, steam_id: str) -> Optional[DriverProfile]:
+        return self.fetch_many([steam_id]).get(steam_id)
 
     def fetch_many(self, keys: List[str]) -> Dict[str, Optional[DriverProfile]]:
         self._guard()  # em pausa: nem chega a consultar o jogo
@@ -1398,8 +1402,9 @@ def _cli(argv: List[str]) -> int:  # pragma: no cover - usa o jogo
     if "--diagnose-shm" in argv:
         from pyLMUSharedMemory.lmu_data import SimInfo
 
-        scoring = SimInfo().LMUData.scoring
-        players = extract_session_players(scoring)
+        lmu_data = SimInfo().LMUData
+        scoring = lmu_data.scoring if lmu_data else None
+        players = extract_session_players(scoring) if scoring else []
         with_id = sum(1 for p in players if p["steam_id"])
         print(f"{len(players)} carros, {with_id} com SteamID ({'OK' if with_id else 'NENHUM SteamID preenchido'})")
         print(json.dumps(players, indent=2, ensure_ascii=False))

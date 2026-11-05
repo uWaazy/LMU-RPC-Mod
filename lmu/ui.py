@@ -21,7 +21,7 @@ class ToolTip:
     def show_tip(self, event=None):
         if self.tip_window or not self.text_func:
             return
-        text = self.text_func() if callable(self.text_func) else str(self.text_func)
+        text = str(self.text_func()) if callable(self.text_func) else str(self.text_func)
         if not text:
             return
         x = self.widget.winfo_rootx() + 20
