@@ -31,7 +31,9 @@ Regras de qualidade:
 from __future__ import annotations
 
 import logging
+import json
 import os
+import random
 import re
 import threading
 import time
@@ -336,6 +338,67 @@ class ProfileCache:
             entry = self._items.get(key)
         return entry[1] if entry else None
 
+    # -- persistencia: evita consultar de novo ao reabrir o app dentro do TTL --
+    def save(self, path: str, keys: Iterable[str]) -> None:
+        data = {}
+        with self._lock:
+            for key in keys:
+                entry = self._items.get(key)
+                if entry and entry[1] is not None and entry[1].has_data:
+                    data[key] = {"stored_at": entry[0], "profile": profile_to_dict(entry[1])}
+        try:
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(data, fh)
+            os.replace(tmp, path)
+        except OSError:
+            logger.debug("[racecontrol] nao foi possivel gravar o cache em disco", exc_info=True)
+
+    def load(self, path: str, max_age: float = 86400.0) -> int:
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            return 0
+        loaded, now = 0, self._clock()
+        for key, item in (data or {}).items():
+            try:
+                stored_at = float(item["stored_at"])
+                profile = profile_from_dict(item["profile"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if profile is None or not (0 <= now - stored_at <= max_age):
+                continue
+            with self._lock:
+                self._items.setdefault(key, (stored_at, profile))
+            loaded += 1
+        return loaded
+
+
+def _rating_to_dict(r: Optional[Rating]):
+    return None if r is None else {"rank": r.rank, "tier": r.tier, "progress": r.progress, "value": r.value}
+
+
+def _rating_from_dict(d: Any) -> Optional[Rating]:
+    if not isinstance(d, dict) or "rank" not in d or "tier" not in d:
+        return None
+    return Rating(str(d["rank"]), int(d["tier"]), d.get("progress"), d.get("value"))
+
+
+def profile_to_dict(p: DriverProfile) -> Dict[str, Any]:
+    return {"steam_id": p.steam_id, "name": p.name, "dr": _rating_to_dict(p.dr), "sr": _rating_to_dict(p.sr),
+            "badge": p.badge, "source": p.source, "fetched_at": p.fetched_at}
+
+
+def profile_from_dict(d: Any) -> Optional[DriverProfile]:
+    if not isinstance(d, dict):
+        return None
+    prof = DriverProfile(steam_id=str(d.get("steam_id") or ""), name=str(d.get("name") or ""),
+                         dr=_rating_from_dict(d.get("dr")), sr=_rating_from_dict(d.get("sr")),
+                         badge=d.get("badge"), source=str(d.get("source") or ""),
+                         fetched_at=float(d.get("fetched_at") or 0.0))
+    return prof if prof.has_data else None
+
 
 # --------------------------------------------------------------------------------------
 # Provedores
@@ -494,14 +557,19 @@ def _redact(text: Any) -> str:
     return _LONG_TOKEN.sub("<redigido>", str(text or "")[:200])
 
 
+RACEOS_MAX_PER_HOUR = 12          # teto local de chamadas ao servidor remoto por hora
+RACEOS_PAUSE_RATE_LIMIT = 900.0   # pausa apos HTTP 429 (dobra a cada reincidencia, ate 4 h)
+RACEOS_PAUSE_SERVER_ERROR = 300.0  # pausa apos HTTP 5xx
+RACEOS_PAUSE_AUTH = 21600.0       # pausa (6 h) se a autenticacao for recusada
+
+
 def _urllib_http(method: str, url: str, headers: Optional[Dict[str, str]] = None, body: Any = None, timeout: float = 10):
-    import json
     import urllib.error
     import urllib.request
 
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(url, data=data, method=method,
-                                 headers={"Content-Type": "application/json", **(headers or {})})
+                                 headers={"Content-Type": "application/json", "User-Agent": "LMU-RPC-Mod", **(headers or {})})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, resp.read().decode("utf-8", errors="replace")
@@ -579,7 +647,8 @@ class RaceOSProvider(ProfileProvider):
     supports_batch = True
 
     def __init__(self, host: str = "raceos.gg", http: Optional[Callable] = None,
-                 clock: Callable[[], float] = time.time, chunk_size: int = 20, local_url: str = RACEOS_LOCAL):
+                 clock: Callable[[], float] = time.time, chunk_size: int = 20, local_url: str = RACEOS_LOCAL,
+                 max_per_hour: int = RACEOS_MAX_PER_HOUR):
         host = (host or "").strip().lower()
         if not RACEOS_HOST_RULE.match(host):
             raise ValueError("host do RaceOS invalido: precisa conter 'raceos' (letras, numeros, pontos e hifens)")
@@ -592,6 +661,40 @@ class RaceOSProvider(ProfileProvider):
         self._expires = 0.0
         self._local_hint = ""
         self._lock = threading.Lock()
+        self.max_per_hour = max(1, int(max_per_hour))
+        self._calls: List[float] = []
+        self._pause_until = 0.0
+        self._strikes = 0
+
+    # -- protecao contra excesso de requisicoes (so o servidor remoto conta; o jogo local nao) --
+    def _pause(self, seconds: float, why: str) -> None:
+        self._pause_until = max(self._pause_until, self._clock() + seconds)
+        logger.warning("[raceos] pausando consultas por %d min (%s)", int(seconds // 60), why)
+
+    def _guard(self) -> None:
+        now = self._clock()
+        if now < self._pause_until:
+            raise ProviderUnavailable(f"RaceOS em pausa por mais {int(self._pause_until - now)} s")
+
+    def _remote(self, method: str, url: str, headers: Optional[Dict[str, str]], body: Any, timeout: float):
+        self._guard()
+        now = self._clock()
+        with self._lock:
+            self._calls = [c for c in self._calls if now - c < 3600.0]
+            if len(self._calls) >= self.max_per_hour:
+                raise ProviderUnavailable("limite local de consultas por hora atingido")
+            self._calls.append(now)
+        status, text = self._http(method, url, headers, body, timeout)
+        if status == 429:
+            self._strikes += 1
+            self._pause(min(14400.0, RACEOS_PAUSE_RATE_LIMIT * 2 ** (self._strikes - 1)), "HTTP 429")
+        elif isinstance(status, int) and status >= 500:
+            self._pause(RACEOS_PAUSE_SERVER_ERROR, f"HTTP {status}")
+        elif status in (401, 403) and url.endswith("/authenticate"):
+            self._pause(RACEOS_PAUSE_AUTH, f"autenticacao recusada (HTTP {status})")
+        elif status == 200:
+            self._strikes = 0
+        return status, text
 
     def set_local_name(self, name: str) -> None:
         self._local_hint = (name or "").strip()
@@ -627,8 +730,8 @@ class RaceOSProvider(ProfileProvider):
         ticket = _extract_ticket(status, text)
         if not ticket:
             raise ProviderUnavailable(f"o jogo nao entregou o ticket (status {status}); o LMU esta aberto?")
-        status, text = self._http("POST", f"https://{self.host}/authenticate", None,
-                                  {"token": ticket, "game": "lmu", "platform": "steam"}, 10)
+        status, text = self._remote("POST", f"https://{self.host}/authenticate", None,
+                                    {"token": ticket, "game": "lmu", "platform": "steam"}, 10)
         if status in (401, 403):
             raise ProviderAuthError(f"authenticate HTTP {status}")
         try:
@@ -649,8 +752,8 @@ class RaceOSProvider(ProfileProvider):
         status, text = None, ""
         for attempt in range(2):
             token = self._authenticate(force=attempt == 1)
-            status, text = self._http("POST", f"https://{self.host}/api/v1/players",
-                                      {"Game-Authorization": token}, {"usernames": usernames}, 10)
+            status, text = self._remote("POST", f"https://{self.host}/api/v1/players",
+                                        {"Game-Authorization": token}, {"usernames": usernames}, 10)
             if status == 401 and attempt == 0:
                 with self._lock:
                     self._token = None
@@ -673,6 +776,7 @@ class RaceOSProvider(ProfileProvider):
         return self.fetch_many([key]).get(key)
 
     def fetch_many(self, keys: List[str]) -> Dict[str, Optional[DriverProfile]]:
+        self._guard()  # em pausa: nem chega a consultar o jogo
         key_names: Dict[str, List[str]] = {}
         for key in keys:
             if key == LOCAL_KEY:
@@ -795,6 +899,8 @@ class RaceControlService:
         self.watch_schedule: List[float] = []           # segundos apos o fim da corrida em que reconsultar
         self._watch: Dict[str, Dict[str, Any]] = {}
         self.on_change: List[Callable[[str, Optional[DriverProfile], DriverProfile], None]] = []
+        self.jitter: float = 0.0                        # variacao (+-) nos passos da vigia, p/ nao sincronizar usuarios
+        self.persist: Optional[Callable[[], None]] = None  # chamado apos um dado novo (grava cache em disco)
 
     # ---- consulta -------------------------------------------------------------------
     def get(self, key: str) -> Optional[DriverProfile]:
@@ -875,6 +981,11 @@ class RaceControlService:
             # Sucesso: o dado novo SUBSTITUI o anterior (SR/DR podem cair e o badge pode sumir ou mudar).
             result = merged
             self.cache.put(key, merged)
+            if self.persist is not None and self._is_local(key):
+                try:
+                    self.persist()
+                except Exception:
+                    logger.debug("[racecontrol] persist falhou", exc_info=True)
             self._fail_count.pop(key, None)
             self._retry_at.pop(key, None)
             logger.info("[racecontrol] %s: DR=%s SR=%s badge=%s (fonte=%s)", key or "local",
@@ -916,7 +1027,8 @@ class RaceControlService:
                 if not k or k in self._watch:  # ja vigiando: mantem a linha de base original
                     continue
                 self._watch[k] = {"baseline": self._sig(self.cache.last_good(k)), "started": now,
-                                  "steps": [now + d for d in self.watch_schedule], "tries": 0}
+                                  "steps": [now + d * (1.0 + random.uniform(-self.jitter, self.jitter)) for d in self.watch_schedule],
+                                  "tries": 0}
                 started.append(k)
         if started:
             logger.info("[racecontrol] vigia pos-corrida iniciada (%s) para %d perfil(is); passos: %s s",
@@ -1021,15 +1133,20 @@ class RaceControlService:
 # Adaptador usado pelo lmu/app.py (mesma interface do antigo RaceControlProfile)
 # --------------------------------------------------------------------------------------
 
+MIN_LOCAL_REFRESH = 1800.0   # nunca reconsulta o jogador local em menos de 30 min
+MAX_WATCH_STEPS = 4          # a vigia pos-corrida faz no maximo 4 consultas
+MIN_WATCH_STEP = 10.0
+LEAVE_TRIGGER_GAP = 600.0    # sair de uma corrida dispara a vigia no maximo a cada 10 min
+
 DEFAULT_RACEOS_CONFIG = {"enabled": False, "host": "raceos.gg", "chunk_size": 20}
 DEFAULT_RC_CONFIG = {
     "enabled": True,
     "cache_ttl_seconds": 900,
-    "negative_ttl_seconds": 120,
+    "negative_ttl_seconds": 300,
     "session_lookup": False,      # opt-in: consultar TAMBEM os demais pilotos da sessao
-    "local_refresh_seconds": 300,  # reconsulta periodica SO do jogador local
+    "local_refresh_seconds": 3600,  # reconsulta periodica SO do jogador local (minimo aplicado: 1800)
     "refresh_on_race_end": True,   # ao fim/abandono de uma corrida, vigia ate o rating mudar
-    "post_race_schedule_seconds": [10, 20, 40, 60, 90, 120, 180, 300],  # ~14 min no total
+    "post_race_schedule_seconds": [30, 90, 240, 600],  # no maximo 4 consultas (~16 min)
     "raceos": DEFAULT_RACEOS_CONFIG,
     "remote_base_url": "",
     "remote_token_env": "LMU_RC_TOKEN",
@@ -1038,7 +1155,8 @@ DEFAULT_RC_CONFIG = {
 }
 
 
-def build_service(config: Optional[Dict[str, Any]] = None, session: Any = None, http: Optional[Callable] = None) -> RaceControlService:
+def build_service(config: Optional[Dict[str, Any]] = None, session: Any = None, http: Optional[Callable] = None,
+                  cache_file: str = "") -> RaceControlService:
     config = config or {}
     rc = {**DEFAULT_RC_CONFIG, **(config.get("racecontrol") or {})}
     raceos_cfg = {**DEFAULT_RACEOS_CONFIG, **(rc.get("raceos") or {})}
@@ -1059,10 +1177,19 @@ def build_service(config: Optional[Dict[str, Any]] = None, session: Any = None, 
             providers.append(remote)
     providers.append(ManualProvider(config.get("dr", ""), config.get("sr", ""), config.get("badge", "")))
     cache = ProfileCache(rc["cache_ttl_seconds"], rc["negative_ttl_seconds"])
-    service = RaceControlService(providers, cache, prefetch_session=bool(rc["session_lookup"]))
-    service.local_ttl = max(30.0, float(rc["local_refresh_seconds"]))
+    service = RaceControlService(providers, cache, prefetch_session=bool(rc["session_lookup"]), max_backoff=3600.0)
+    # Limites de seguranca valem mesmo para config.json antigos (valores menores sao ignorados)
+    service.local_ttl = max(MIN_LOCAL_REFRESH, float(rc["local_refresh_seconds"]))
+    service.jitter = 0.1
     if rc["refresh_on_race_end"]:
-        service.watch_schedule = [max(5.0, float(x)) for x in (rc["post_race_schedule_seconds"] or [])]
+        steps = sorted(max(MIN_WATCH_STEP, float(x)) for x in (rc["post_race_schedule_seconds"] or []))
+        service.watch_schedule = steps[:MAX_WATCH_STEPS]
+    # Cache em disco (so com RaceOS ativo): reabrir o app nao gera nova consulta enquanto o dado estiver fresco
+    if cache_file and any(p.name == "raceos" for p in providers):
+        loaded = cache.load(cache_file)
+        if loaded:
+            logger.info("[racecontrol] %d perfil(is) carregado(s) do cache em disco (sem nova consulta)", loaded)
+        service.persist = lambda: cache.save(cache_file, {service.local_key, LOCAL_KEY})
     configured_id = str(config.get("steamid") or "").strip()
     if configured_id.isdigit():
         service.local_steam_id = configured_id
@@ -1073,9 +1200,10 @@ class RaceControlProfile:
     """Fachada para o lmu/app.py. Substitui a antiga classe de mesmo nome (que lia campos
     inexistentes da Shared Memory e chamava URLs adivinhadas)."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None, service: Optional[RaceControlService] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, service: Optional[RaceControlService] = None,
+                 cache_file: str = ""):
         self.config = config or {}
-        self.service = service or build_service(self.config)
+        self.service = service or build_service(self.config, cache_file=cache_file)
         self._assets = {**DEFAULT_BADGE_ASSETS, **((self.config.get("racecontrol") or {}).get("badge_assets") or {})}
         self.lock = threading.Lock()
         self._last_session = ""
@@ -1152,9 +1280,9 @@ class RaceControlProfile:
         left_race = self._last_session == "race" and session != "race"
         self._last_session, self._last_phase = session, phase
         if left_race and not race_over:
-            # pausa/carregamento no meio da corrida tambem parece "saiu": no maximo 1 disparo a cada 2 min
+            # pausa/carregamento no meio da corrida tambem parece "saiu": no maximo 1 disparo a cada 10 min
             now = self.service._clock()
-            if now - self._last_leave_trigger < 120:
+            if now - self._last_leave_trigger < LEAVE_TRIGGER_GAP:
                 return
             self._last_leave_trigger = now
         if not (race_over or left_race):
